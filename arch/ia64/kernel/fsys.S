@@ -68,10 +68,10 @@ ENTRY(fsys_getpid)
 	add r9=TI_FLAGS+IA64_TASK_SIZE,r16
 	;;
 	ld4 r9=[r9]
-	add r17=IA64_SIGNAL_PIDS_TGID_OFFSET,r17
+	add r17=IA64_SIGNAL_LEADER_PID_OFFSET,r17
 	;;
 	and r9=TIF_ALLWORK_MASK,r9
-	ld8 r17=[r17]				// r17 = current->signal->pids[PIDTYPE_TGID]
+	ld8 r17=[r17]				// r17 = current->signal->leader_pid
 	;;
 	add r8=IA64_PID_LEVEL_OFFSET,r17
 	;;
@@ -96,11 +96,11 @@ ENTRY(fsys_set_tid_address)
 	.altrp b6
 	.body
 	add r9=TI_FLAGS+IA64_TASK_SIZE,r16
-	add r17=IA64_TASK_THREAD_PID_OFFSET,r16
+	add r17=IA64_TASK_TGIDLINK_OFFSET,r16
 	;;
 	ld4 r9=[r9]
 	tnat.z p6,p7=r32		// check argument register for being NaT
-	ld8 r17=[r17]				// r17 = current->thread_pid
+	ld8 r17=[r17]				// r17 = current->pids[PIDTYPE_PID].pid
 	;;
 	and r9=TIF_ALLWORK_MASK,r9
 	add r8=IA64_PID_LEVEL_OFFSET,r17
