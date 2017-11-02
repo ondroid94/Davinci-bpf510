@@ -132,13 +132,10 @@ config HAVE_KERNEL_LZO
 config HAVE_KERNEL_LZ4
 	bool
 
-config HAVE_KERNEL_ZSTD
-        bool
-
 choice
 	prompt "Kernel compression mode"
 	default KERNEL_GZIP
-	depends on HAVE_KERNEL_GZIP || HAVE_KERNEL_BZIP2 || HAVE_KERNEL_LZMA || HAVE_KERNEL_XZ || HAVE_KERNEL_LZO || HAVE_KERNEL_LZ4 || HAVE_KERNEL_ZSTD
+	depends on HAVE_KERNEL_GZIP || HAVE_KERNEL_BZIP2 || HAVE_KERNEL_LZMA || HAVE_KERNEL_XZ || HAVE_KERNEL_LZO || HAVE_KERNEL_LZ4
 	help
 	  The linux kernel is a kind of self-extracting executable.
 	  Several compression algorithms are available, which differ
@@ -216,16 +213,6 @@ config KERNEL_LZ4
 	  Its compression ratio is worse than LZO. The size of the kernel
 	  is about 8% bigger than LZO. But the decompression speed is
 	  faster than LZO.
-
-config KERNEL_ZSTD
-	bool "ZSTD"
-	depends on HAVE_KERNEL_ZSTD
-	help
-	  ZSTD is a compression algorithm targeting intermediate compression
-	  with fast decompression speed. It will compress better than GZIP and
-	  decompress around the same speed as LZO, but slower than LZ4. You
-	  will need at least 192 KB RAM or more for booting. The zstd command
-	  line tool is required for compression.
 
 endchoice
 
@@ -330,20 +317,15 @@ config AUDIT
 	help
 	  Enable auditing infrastructure that can be used with another
 	  kernel subsystem, such as SELinux (which requires this for
-	  logging of avc messages output). Does not do system-call
-	  auditing without CONFIG_AUDITSYSCALL.
+	  logging of avc messages output).  System call auditing is included
+	  on architectures which support it.
 
 config HAVE_ARCH_AUDITSYSCALL
 	bool
 
 config AUDITSYSCALL
-	bool "Enable system-call auditing support"
+	def_bool y
 	depends on AUDIT && HAVE_ARCH_AUDITSYSCALL
-	default y if SECURITY_SELINUX
-	help
-	  Enable low-overhead system-call auditing infrastructure that
-	  can be used independently or with another kernel subsystem,
-	  such as SELinux.
 
 config AUDIT_WATCH
 	def_bool y
@@ -598,16 +580,6 @@ config LOG_BUF_SHIFT
 		     13 =>  8 KB
 		     12 =>  4 KB
 
-config CONSOLE_FLUSH_ON_HOTPLUG
-	bool "Enable console flush configurable in hot plug code path"
-	depends on HOTPLUG_CPU
-	def_bool n
-	help
-	In cpu hot plug path console lock acquire and release causes the
-	console to flush. If console lock is not free hot plug latency
-	increases. So make console flush configurable in hot plug path
-	and default disabled to help in cpu hot plug latencies.
-
 config LOG_CPU_MAX_BUF_SHIFT
 	int "CPU kernel log buffer size contribution (13 => 8 KB, 17 => 128KB)"
 	depends on SMP
@@ -859,7 +831,6 @@ config FAIR_GROUP_SCHED
 config CFS_BANDWIDTH
 	bool "CPU bandwidth provisioning for FAIR_GROUP_SCHED"
 	depends on FAIR_GROUP_SCHED
-	depends on !SCHED_WALT
 	default n
 	help
 	  This option allows users to define CPU bandwidth rates (limits) for
@@ -1002,16 +973,6 @@ config SOCK_CGROUP_DATA
 	default n
 
 endif # CGROUPS
-
-config SCHED_CORE_CTL
-	bool "QTI Core Control"
-	depends on SMP
-	help
-	  This options enables the core control functionality in
-	  the scheduler. Core control automatically offline and
-	  online cores based on cpu load and utilization.
-
-	  If unsure, say N here.
 
 config CHECKPOINT_RESTORE
 	bool "Checkpoint/restore support" if EXPERT
@@ -1499,6 +1460,7 @@ config EVENTFD
 config BPF_SYSCALL
 	bool "Enable bpf() system call"
 	select BPF
+	select IRQ_WORK
 	default n
 	help
 	  Enable the bpf() system call that allows to manipulate eBPF
@@ -1557,14 +1519,10 @@ config USERFAULTFD
 	  Enable the userfaultfd() system call that allows to intercept and
 	  handle page faults in userland.
 
-config PCI_QUIRKS
-	default y
-	bool "Enable PCI quirk workarounds" if EXPERT
-	depends on PCI
+config HAVE_ARCH_USERFAULTFD_MINOR
+	bool
 	help
-	  This enables workarounds for various PCI chipset
-	  bugs/quirks. Disable this only if your target machine is
-	  unaffected by PCI quirks.
+	  Arch has userfaultfd minor fault support
 
 config MEMBARRIER
 	bool "Enable membarrier() system call" if EXPERT
@@ -1634,16 +1592,6 @@ config PERF_EVENTS
 	  capabilities on top of those.
 
 	  Say Y if unsure.
-
-config PERF_USER_SHARE
-	bool "Perf event sharing with user-space"
-	help
-	  Say yes here to enable the user-space sharing of events. The events
-	  can be shared among other user-space events or with kernel created
-	  events that has the same config and type event attributes.
-
-	  Say N if unsure.
-
 
 config DEBUG_PERF_USE_VMALLOC
 	default n
