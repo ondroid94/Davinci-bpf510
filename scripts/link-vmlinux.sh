@@ -40,7 +40,7 @@ set -e
 info()
 {
 	if [ "${quiet}" != "silent_" ]; then
-		printf "  %-7s %s\n" ${1} ${2}
+		printf "  %-7s %s\n" "${1}" "${2}"
 	fi
 }
 
@@ -55,18 +55,16 @@ info()
 #
 archive_builtin()
 {
-	if [ -n "${CONFIG_THIN_ARCHIVES}" ]; then
-		info AR built-in.o
-		rm -f built-in.o;
-		${AR} rcsTP${KBUILD_ARFLAGS} built-in.o			\
-					${KBUILD_VMLINUX_INIT}		\
-					${KBUILD_VMLINUX_MAIN}
+	info AR built-in.o
+	rm -f built-in.o;
+	${AR} rcsTP${KBUILD_ARFLAGS} built-in.o			\
+				${KBUILD_VMLINUX_INIT}		\
+				${KBUILD_VMLINUX_MAIN}
 
-		if [ -n "${CONFIG_LTO_CLANG}" ]; then
-			mv -f built-in.o built-in.o.tmp
-			${LLVM_AR} rcsT${KBUILD_ARFLAGS} built-in.o $(${AR} t built-in.o.tmp)
-			rm -f built-in.o.tmp
-		fi
+	if [ -n "${CONFIG_LTO_CLANG}" ]; then
+		mv -f built-in.o built-in.o.tmp
+		${LLVM_AR} rcsT${KBUILD_ARFLAGS} built-in.o $(${AR} t built-in.o.tmp)
+		rm -f built-in.o.tmp
 	fi
 }
 
@@ -102,20 +100,12 @@ modpost_link()
 {
 	local objects
 
-	if [ -n "${CONFIG_THIN_ARCHIVES}" ]; then
-		objects="--whole-archive				\
-			built-in.o					\
-			--no-whole-archive				\
-			--start-group					\
-			${KBUILD_VMLINUX_LIBS}				\
-			--end-group"
-	else
-		objects="${KBUILD_VMLINUX_INIT}				\
-			--start-group					\
-			${KBUILD_VMLINUX_MAIN}				\
-			${KBUILD_VMLINUX_LIBS}				\
-			--end-group"
-	fi
+	objects="--whole-archive				\
+		built-in.o					\
+		--no-whole-archive				\
+		--start-group					\
+		${KBUILD_VMLINUX_LIBS}				\
+		--end-group"
 
 	if [ -n "${CONFIG_LTO_CLANG}" ]; then
 		# This might take a while, so indicate that we're doing
@@ -142,8 +132,8 @@ recordmcount()
 }
 
 # Link of vmlinux
-# ${1} - optional extra .o files
-# ${2} - output file
+# ${1} - output file
+# ${@:2} - optional extra .o files
 vmlinux_link()
 {
 	local lds="${objtree}/${KBUILD_LDS}"
@@ -158,48 +148,72 @@ vmlinux_link()
 			ldflags="${LDFLAGS_FINAL_vmlinux} ${LDFLAGS_vmlinux}"
 		fi
 
-		if [[ -n "${CONFIG_THIN_ARCHIVES}" && -z "${CONFIG_LTO_CLANG}" ]]; then
-			objects="--whole-archive 			\
-				built-in.o				\
-				--no-whole-archive			\
-				--start-group				\
-				${KBUILD_VMLINUX_LIBS}			\
-				--end-group				\
-				${1}"
+		if [ -z "${CONFIG_LTO_CLANG}" ]; then
+			objects="--whole-archive		\
+				built-in.o			\
+				--no-whole-archive		\
+				--start-group			\
+				${KBUILD_VMLINUX_LIBS}		\
+				--end-group			\
+				${@:2}"
 		else
-			objects="${KBUILD_VMLINUX_INIT}			\
-				--start-group				\
-				${KBUILD_VMLINUX_MAIN}			\
-				${KBUILD_VMLINUX_LIBS}			\
-				--end-group				\
-				${1}"
+			objects="--start-group			\
+				vmlinux.o			\
+				--end-group			\
+				${@:2}"
 		fi
 
-		${ld} ${ldflags} -o ${2} -T ${lds} ${objects}
+		${LD} ${LDFLAGS} ${LDFLAGS_vmlinux} -o ${1}	\
+			-T ${lds} ${objects}
 	else
-		if [ -n "${CONFIG_THIN_ARCHIVES}" ]; then
-			objects="-Wl,--whole-archive			\
-				built-in.o				\
-				-Wl,--no-whole-archive			\
-				-Wl,--start-group			\
-				${KBUILD_VMLINUX_LIBS}			\
-				-Wl,--end-group				\
-				${1}"
-		else
-			objects="${KBUILD_VMLINUX_INIT}			\
-				-Wl,--start-group			\
-				${KBUILD_VMLINUX_MAIN}			\
-				${KBUILD_VMLINUX_LIBS}			\
-				-Wl,--end-group				\
-				${1}"
-		fi
+		objects="-Wl,--whole-archive			\
+			built-in.o				\
+			-Wl,--no-whole-archive			\
+			-Wl,--start-group			\
+			${KBUILD_VMLINUX_LIBS}			\
+			-Wl,--end-group				\
+			${@:2}"
 
-		${CC} ${CFLAGS_vmlinux} -o ${2}				\
-			-Wl,-T,${lds}					\
-			${objects}					\
+		${CC} ${CFLAGS_vmlinux} -o ${1}			\
+			-Wl,-T,${lds}				\
+			${objects}				\
 			-lutil -lrt -lpthread
 		rm -f linux
 	fi
+}
+
+# generate .BTF typeinfo from DWARF debuginfo
+# ${1} - vmlinux image
+# ${2} - file to dump raw BTF data into
+gen_btf()
+{
+	local pahole_ver
+
+	if ! [ -x "$(command -v ${PAHOLE})" ]; then
+		info "BTF" "${1}: pahole (${PAHOLE}) is not available"
+		return 1
+	fi
+
+	pahole_ver=$(${PAHOLE} --version | sed -E 's/v([0-9]+)\.([0-9]+)/\1\2/')
+	if [ "${pahole_ver}" -lt "113" ]; then
+		info "BTF" "${1}: pahole version $(${PAHOLE} --version) is too old, need at least v1.13"
+		return 1
+	fi
+
+	info "BTF" ${2}
+	vmlinux_link ${1}
+	LLVM_OBJCOPY=${OBJCOPY} ${PAHOLE} -J ${1}
+
+	# Create ${2} which contains just .BTF section but no symbols. Add
+	# SHF_ALLOC because .BTF will be part of the vmlinux image. --strip-all
+	# deletes all symbols including __start_BTF and __stop_BTF, which will
+	# be redefined in the linker script. Add 2>/dev/null to suppress GNU
+	# objcopy warnings: "empty loadable segment detected at ..."
+	${OBJCOPY} --only-section=.BTF --set-section-flags .BTF=alloc,readonly \
+		--strip-all ${1} ${2} 2>/dev/null
+	# Change e_type to ET_REL so that it can be used to link final vmlinux.
+	# Unlike GNU ld, lld does not allow an ET_EXEC input.
+	printf '\1' | dd of=${2} conv=notrunc bs=1 seek=16 status=none
 }
 
 # Create ${2} .o file with all symbols from the ${1} object file
@@ -233,31 +247,6 @@ kallsyms()
 	${CC} ${aflags} -c -o ${2} ${afile}
 }
 
-# Generates ${2} .o file with RTIC MP's from the ${1} object file (vmlinux)
-# ${3} the file name where the sizes of the RTIC MP structure are stored
-# just in case, save copy of the RTIC mp to ${4}
-# Note: RTIC_MPGEN has to be set if MPGen is available
-rtic_mp()
-{
-	# assume that RTIC_MP_O generation may fail
-	RTIC_MP_O=
-
-	local aflags="${KBUILD_AFLAGS} ${KBUILD_AFLAGS_KERNEL}               \
-		      ${NOSTDINC_FLAGS} ${LINUXINCLUDE} ${KBUILD_CPPFLAGS}"
-
-	${RTIC_MPGEN} --objcopy="${OBJCOPY}" --objdump="${OBJDUMP}" \
-	--binpath='' --vmlinux=${1} --config=${KCONFIG_CONFIG} && \
-	cat rtic_mp.c | ${CC} ${aflags} -c -o ${2} -x c - && \
-	cp rtic_mp.c ${4} && \
-	${NM} --print-size --size-sort ${2} > ${3} && \
-	RTIC_MP_O=${2} || echo “RTIC MP generation has failed”
-	# NM - save generated variable sizes for verification
-	# RTIC_MP_O is our retval - great success if set to generated .o file
-	# Echo statement above prints the error message in case any of the
-	# above RTIC MP generation commands fail and it ensures rtic mp failure
-	# does not cause kernel compilation to fail.
-}
-
 # Create map file with all symbols from ${1}
 # See mksymap for additional details
 mksysmap()
@@ -273,6 +262,7 @@ sortextable()
 # Delete output files in case of error
 cleanup()
 {
+	rm -f .btf.*
 	rm -f .old_version
 	rm -f .tmp_System.map
 	rm -f .tmp_kallsyms*
@@ -283,8 +273,6 @@ cleanup()
 	rm -f System.map
 	rm -f vmlinux
 	rm -f vmlinux.o
-	rm -f .tmp_rtic_mp_sz*
-	rm -f rtic_mp.*
 }
 
 on_exit()
@@ -357,13 +345,11 @@ if [ -n "${CONFIG_LTO_CLANG}" ]; then
 	recordmcount vmlinux.o
 fi
 
-# Generate RTIC MP placeholder compile unit of the correct size
-# and add it to the list of link objects
-# this needs to be done before generating kallsyms
-if [ ! -z ${RTIC_MPGEN+x} ]; then
-	rtic_mp vmlinux.o rtic_mp.o .tmp_rtic_mp_sz1 .tmp_rtic_mp1.c
-	KBUILD_VMLINUX_LIBS+=" "
-	KBUILD_VMLINUX_LIBS+=$RTIC_MP_O
+btf_vmlinux_bin_o=""
+if [ -n "${CONFIG_DEBUG_INFO_BTF}" ]; then
+	if gen_btf .tmp_vmlinux.btf .btf.vmlinux.bin.o ; then
+		btf_vmlinux_bin_o=.btf.vmlinux.bin.o
+	fi
 fi
 
 kallsymso=""
@@ -397,11 +383,11 @@ if [ -n "${CONFIG_KALLSYMS}" ]; then
 	kallsyms_vmlinux=.tmp_vmlinux2
 
 	# step 1
-	vmlinux_link "" .tmp_vmlinux1
+	vmlinux_link .tmp_vmlinux1 ${btf_vmlinux_bin_o}
 	kallsyms .tmp_vmlinux1 .tmp_kallsyms1.o
 
 	# step 2
-	vmlinux_link .tmp_kallsyms1.o .tmp_vmlinux2
+	vmlinux_link .tmp_vmlinux2 .tmp_kallsyms1.o ${btf_vmlinux_bin_o}
 	kallsyms .tmp_vmlinux2 .tmp_kallsyms2.o
 
 	# step 3
@@ -412,30 +398,13 @@ if [ -n "${CONFIG_KALLSYMS}" ]; then
 		kallsymso=.tmp_kallsyms3.o
 		kallsyms_vmlinux=.tmp_vmlinux3
 
-		vmlinux_link .tmp_kallsyms2.o .tmp_vmlinux3
-
+		vmlinux_link .tmp_vmlinux3 .tmp_kallsyms2.o ${btf_vmlinux_bin_o}
 		kallsyms .tmp_vmlinux3 .tmp_kallsyms3.o
 	fi
 fi
 
-# Update RTIC MP object by replacing the place holder
-# with actual MP data of the same size
-# Also double check that object size did not change
-# Note: Check initilally if RTIC_MP_O is not empty or uninitialized,
-# as incase RTIC_MPGEN is set and failure occurs in RTIC_MP_O
-# generation, below check for comparing object sizes fails
-# due to an empty RTIC_MP_O object.
-if [ ! -z ${RTIC_MP_O} ]; then
-	rtic_mp "${kallsyms_vmlinux}" rtic_mp.o .tmp_rtic_mp_sz2 \
-		.tmp_rtic_mp2.c
-	if ! cmp -s .tmp_rtic_mp_sz1 .tmp_rtic_mp_sz2; then
-		echo >&2 'ERROR: RTIC MP object files size mismatch'
-		exit 1
-	fi
-fi
-
 info LD vmlinux
-vmlinux_link "${kallsymso}" vmlinux
+vmlinux_link vmlinux "${kallsymso}" "${btf_vmlinux_bin_o}"
 
 # fill in BTF IDs
 if [ -n "${CONFIG_DEBUG_INFO_BTF}" ]; then
@@ -460,21 +429,6 @@ if [ -n "${CONFIG_KALLSYMS}" ]; then
 		echo >&2 Try "make KALLSYMS_EXTRA_PASS=1" as a workaround
 		exit 1
 	fi
-fi
-
-# Starting Android Q, the DTB's are part of dtb.img and not part
-# of the kernel image. RTIC DTS relies on the kernel environment
-# and could not build outside of the kernel. Generate RTIC DTS after
-# successful kernel build if MPGen is enabled. The DTB will be
-# generated with dtb.img in kernel_definitions.mk.
-if [ ! -z ${RTIC_MPGEN+x} ]; then
-	${RTIC_MPGEN} --objcopy="${OBJCOPY}" --objdump="${OBJDUMP}" \
-		--binpath="" --vmlinux="vmlinux" --config=${KCONFIG_CONFIG} \
-		--cc="${CC} ${KBUILD_AFLAGS}" --dts=rtic_mp.dts \
-		|| echo “RTIC MP DTS generation has failed”
-	# Echo statement above prints the error message in case above
-	# RTIC MP DTS generation command fails and it ensures rtic mp
-	# failure does not cause kernel compilation to fail.
 fi
 
 # We made a new kernel - delete old version file
