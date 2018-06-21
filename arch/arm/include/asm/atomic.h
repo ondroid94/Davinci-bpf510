@@ -130,7 +130,7 @@ static inline int atomic_cmpxchg_relaxed(atomic_t *ptr, int old, int new)
 }
 #define atomic_cmpxchg_relaxed		atomic_cmpxchg_relaxed
 
-static inline int __atomic_add_unless(atomic_t *v, int a, int u)
+static inline int atomic_fetch_add_unless(atomic_t *v, int a, int u)
 {
 	int oldval, newval;
 	unsigned long tmp;
@@ -156,6 +156,7 @@ static inline int __atomic_add_unless(atomic_t *v, int a, int u)
 
 	return oldval;
 }
+#define atomic_fetch_add_unless		atomic_fetch_add_unless
 
 #else /* ARM_ARCH_6 */
 
@@ -213,16 +214,6 @@ static inline int atomic_cmpxchg(atomic_t *v, int old, int new)
 	raw_local_irq_restore(flags);
 
 	return ret;
-}
-
-static inline int __atomic_add_unless(atomic_t *v, int a, int u)
-{
-	int c, old;
-
-	c = atomic_read(v);
-	while (c != u && (old = atomic_cmpxchg((v), c, c + a)) != c)
-		c = old;
-	return c;
 }
 
 #endif /* __LINUX_ARM_ARCH__ */
