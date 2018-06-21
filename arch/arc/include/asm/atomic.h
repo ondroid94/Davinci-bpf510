@@ -308,6 +308,36 @@ ATOMIC_OPS(xor, ^=, CTOP_INST_AXOR_DI_R2_R2_R3)
 #undef ATOMIC_OP_RETURN
 #undef ATOMIC_OP
 
+/**
+ * atomic_fetch_add_unless - add unless the number is a given value
+ * @v: pointer of type atomic_t
+ * @a: the amount to add to v...
+ * @u: ...unless v is equal to u.
+ *
+ * Atomically adds @a to @v, so long as it was not @u.
+ * Returns the old value of @v
+ */
+#define atomic_fetch_add_unless(v, a, u)					\
+({									\
+	int c, old;							\
+									\
+	/*								\
+	 * Explicit full memory barrier needed before/after as		\
+	 * LLOCK/SCOND thmeselves don't provide any such semantics	\
+	 */								\
+	smp_mb();							\
+									\
+	c = atomic_read(v);						\
+	while (c != (u) && (old = atomic_cmpxchg((v), c, c + (a))) != c)\
+		c = old;						\
+									\
+	smp_mb();							\
+									\
+	c;								\
+})
+
+#define atomic_inc_not_zero(v)		atomic_add_unless((v), 1, 0)
+
 #define atomic_inc(v)			atomic_add(1, v)
 #define atomic_dec(v)			atomic_sub(1, v)
 
@@ -531,40 +561,41 @@ static inline long long atomic64_dec_if_positive(atomic64_t *v)
 }
 
 /**
- * atomic64_fetch_add_unless - add unless the number is a given value
+ * atomic64_add_unless - add unless the number is a given value
  * @v: pointer of type atomic64_t
  * @a: the amount to add to v...
  * @u: ...unless v is equal to u.
  *
- * Atomically adds @a to @v, if it was not @u.
- * Returns the old value of @v
+ * if (v != u) { v += a; ret = 1} else {ret = 0}
+ * Returns 1 iff @v was not @u (i.e. if add actually happened)
  */
-static inline long long atomic64_fetch_add_unless(atomic64_t *v, long long a,
-						  long long u)
+static inline int atomic64_add_unless(atomic64_t *v, long long a, long long u)
 {
-	long long old, temp;
+	long long val;
+	int op_done;
 
 	smp_mb();
 
 	__asm__ __volatile__(
 	"1:	llockd  %0, [%2]	\n"
+	"	mov	%1, 1		\n"
 	"	brne	%L0, %L4, 2f	# continue to add since v != u \n"
 	"	breq.d	%H0, %H4, 3f	# return since v == u \n"
+	"	mov	%1, 0		\n"
 	"2:				\n"
-	"	add.f   %L1, %L0, %L3	\n"
-	"	adc     %H1, %H0, %H3	\n"
-	"	scondd  %1, [%2]	\n"
+	"	add.f   %L0, %L0, %L3	\n"
+	"	adc     %H0, %H0, %H3	\n"
+	"	scondd  %0, [%2]	\n"
 	"	bnz     1b		\n"
 	"3:				\n"
-	: "=&r"(old), "=&r" (temp)
+	: "=&r"(val), "=&r" (op_done)
 	: "r"(&v->counter), "r"(a), "r"(u)
 	: "cc");	/* memory clobber comes from smp_mb() */
 
 	smp_mb();
 
-	return old;
+	return op_done;
 }
-#define atomic64_fetch_add_unless atomic64_fetch_add_unless
 
 #define atomic64_add_negative(a, v)	(atomic64_add_return((a), (v)) < 0)
 #define atomic64_inc(v)			atomic64_add(1LL, (v))
@@ -574,6 +605,7 @@ static inline long long atomic64_fetch_add_unless(atomic64_t *v, long long a,
 #define atomic64_dec(v)			atomic64_sub(1LL, (v))
 #define atomic64_dec_return(v)		atomic64_sub_return(1LL, (v))
 #define atomic64_dec_and_test(v)	(atomic64_dec_return((v)) == 0)
+#define atomic64_inc_not_zero(v)	atomic64_add_unless((v), 1LL, 0LL)
 
 #endif	/* !CONFIG_GENERIC_ATOMIC64 */
 
