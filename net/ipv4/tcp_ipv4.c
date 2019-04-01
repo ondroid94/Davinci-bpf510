@@ -138,6 +138,21 @@ int tcp_twsk_unique(struct sock *sk, struct sock *sktw, void *twp)
 }
 EXPORT_SYMBOL_GPL(tcp_twsk_unique);
 
+static int tcp_v4_pre_connect(struct sock *sk, struct sockaddr *uaddr,
+			      int addr_len)
+{
+	/* This check is replicated from tcp_v4_connect() and intended to
+	 * prevent BPF program called below from accessing bytes that are out
+	 * of the bound specified by user in addr_len.
+	 */
+	if (addr_len < sizeof(struct sockaddr_in))
+		return -EINVAL;
+
+	sock_owned_by_me(sk);
+
+	return BPF_CGROUP_RUN_PROG_INET4_CONNECT(sk, uaddr);
+}
+
 /* This will initiate an outgoing connection. */
 int tcp_v4_connect(struct sock *sk, struct sockaddr *uaddr, int addr_len)
 {
@@ -2281,7 +2296,6 @@ static void get_tcp4_sock(struct sock *sk, struct seq_file *f, int i)
 	__be32 src = inet->inet_rcv_saddr;
 	__u16 destp = ntohs(inet->inet_dport);
 	__u16 srcp = ntohs(inet->inet_sport);
-	__u8 seq_state = sk->sk_state;
 	int rx_queue;
 	int state;
 
@@ -2301,9 +2315,6 @@ static void get_tcp4_sock(struct sock *sk, struct seq_file *f, int i)
 		timer_expires = jiffies;
 	}
 
-	if (inet->transparent)
-		seq_state |= 0x80;
-
 	state = sk_state_load(sk);
 	if (state == TCP_LISTEN)
 		rx_queue = sk->sk_ack_backlog;
@@ -2315,7 +2326,7 @@ static void get_tcp4_sock(struct sock *sk, struct seq_file *f, int i)
 
 	seq_printf(f, "%4d: %08X:%04X %08X:%04X %02X %08X:%08X %02X:%08lX "
 			"%08X %5u %8d %lu %d %pK %lu %lu %u %u %d",
-		i, src, srcp, dest, destp, seq_state,
+		i, src, srcp, dest, destp, state,
 		tp->write_seq - tp->snd_una,
 		rx_queue,
 		timer_active,
@@ -2427,6 +2438,7 @@ struct proto tcp_prot = {
 	.name			= "TCP",
 	.owner			= THIS_MODULE,
 	.close			= tcp_close,
+	.pre_connect		= tcp_v4_pre_connect,
 	.connect		= tcp_v4_connect,
 	.disconnect		= tcp_disconnect,
 	.accept			= inet_csk_accept,
@@ -2473,6 +2485,9 @@ EXPORT_SYMBOL(tcp_prot);
 static void __net_exit tcp_sk_exit(struct net *net)
 {
 	int cpu;
+
+	if (net->ipv4.tcp_congestion_control)
+		module_put(net->ipv4.tcp_congestion_control->owner);
 
 	for_each_possible_cpu(cpu)
 		inet_ctl_sock_destroy(*per_cpu_ptr(net->ipv4.tcp_sk, cpu));
@@ -2536,6 +2551,19 @@ static int __net_init tcp_sk_init(struct net *net)
 	net->ipv4.sysctl_tcp_window_scaling = 1;
 	net->ipv4.sysctl_tcp_timestamps = 1;
 	net->ipv4.sysctl_tcp_default_init_rwnd = TCP_INIT_CWND * 2;
+	net->ipv4.sysctl_tcp_early_retrans = 3;
+
+	net->ipv4.sysctl_tcp_fastopen = TFO_CLIENT_ENABLE;
+	spin_lock_init(&net->ipv4.tcp_fastopen_ctx_lock);
+	net->ipv4.sysctl_tcp_fastopen_blackhole_timeout = 60 * 60;
+	atomic_set(&net->ipv4.tfo_active_disable_times, 0);
+
+	/* Reno is always built in */
+	if (!net_eq(net, &init_net) &&
+	    try_module_get(init_net.ipv4.tcp_congestion_control->owner))
+		net->ipv4.tcp_congestion_control = init_net.ipv4.tcp_congestion_control;
+	else
+		net->ipv4.tcp_congestion_control = &tcp_reno;
 
 	return 0;
 fail:
@@ -2546,7 +2574,12 @@ fail:
 
 static void __net_exit tcp_sk_exit_batch(struct list_head *net_exit_list)
 {
+	struct net *net;
+
 	inet_twsk_purge(&tcp_hashinfo, AF_INET);
+
+	list_for_each_entry(net, net_exit_list, exit_list)
+		tcp_fastopen_ctx_destroy(net);
 }
 
 static struct pernet_operations __net_initdata tcp_sk_ops = {
