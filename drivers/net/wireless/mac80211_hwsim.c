@@ -1343,10 +1343,12 @@ static bool mac80211_hwsim_tx_frame_no_nl(struct ieee80211_hw *hw,
 	 * probably doesn't really matter.
 	 */
 	if (ieee80211_is_beacon(hdr->frame_control) ||
-	    ieee80211_is_probe_resp(hdr->frame_control))
+	    ieee80211_is_probe_resp(hdr->frame_control)) {
+		rx_status.boottime_ns = ktime_get_boottime_ns();
 		now = data->abs_bcn_ts;
-	else
+	} else {
 		now = mac80211_hwsim_get_tsf_raw();
+	}
 
 	/* Copy skb to all enabled radios that are on the current frequency */
 	spin_lock(&hwsim_radio_lock);
@@ -2660,8 +2662,8 @@ static int mac80211_hwsim_new_radio(struct genl_info *info,
 		addr[4] = idx;
 		memcpy(data->addresses[0].addr, addr, ETH_ALEN);
 		/* Why need here second address ? */
-		data->addresses[1].addr[0] |= 0x40;
 		memcpy(data->addresses[1].addr, addr, ETH_ALEN);
+		data->addresses[1].addr[0] |= 0x40;
 		hw->wiphy->n_addresses = 2;
 		hw->wiphy->addresses = data->addresses;
 		/* possible address clash is checked at hash table insertion */
@@ -3330,6 +3332,7 @@ static int hwsim_new_radio_nl(struct sk_buff *msg, struct genl_info *info)
 	if (info->attrs[HWSIM_ATTR_PERM_ADDR]) {
 		if (!is_valid_ether_addr(
 				nla_data(info->attrs[HWSIM_ATTR_PERM_ADDR]))) {
+			kfree(hwname);
 			return -EINVAL;
 		}
 
@@ -3703,7 +3706,7 @@ static void hwsim_virtio_rx_work(struct work_struct *work)
 	}
 	vq = hwsim_vqs[HWSIM_VQ_RX];
 	sg_init_one(sg, skb->head, skb_end_offset(skb));
-	err = virtqueue_add_inbuf(vq, sg, 1, skb, GFP_KERNEL);
+	err = virtqueue_add_inbuf(vq, sg, 1, skb, GFP_ATOMIC);
 	if (WARN(err, "virtqueue_add_inbuf returned %d\n", err))
 		nlmsg_free(skb);
 	else
@@ -3788,6 +3791,8 @@ static int hwsim_virtio_probe(struct virtio_device *vdev)
 	err = init_vqs(vdev);
 	if (err)
 		return err;
+
+	virtio_device_ready(vdev);
 
 	err = fill_vq(hwsim_vqs[HWSIM_VQ_RX]);
 	if (err)
