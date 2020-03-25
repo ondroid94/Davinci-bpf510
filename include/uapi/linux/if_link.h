@@ -903,11 +903,12 @@ enum {
 #define XDP_FLAGS_SKB_MODE		(1U << 1)
 #define XDP_FLAGS_DRV_MODE		(1U << 2)
 #define XDP_FLAGS_HW_MODE		(1U << 3)
+#define XDP_FLAGS_REPLACE		(1U << 4)
 #define XDP_FLAGS_MODES			(XDP_FLAGS_SKB_MODE | \
 					 XDP_FLAGS_DRV_MODE | \
 					 XDP_FLAGS_HW_MODE)
 #define XDP_FLAGS_MASK			(XDP_FLAGS_UPDATE_IF_NOEXIST | \
-					 XDP_FLAGS_MODES)
+					 XDP_FLAGS_MODES | XDP_FLAGS_REPLACE)
 
 /* These are stored into IFLA_XDP_ATTACHED on dump. */
 enum {
@@ -915,6 +916,7 @@ enum {
 	XDP_ATTACHED_DRV,
 	XDP_ATTACHED_SKB,
 	XDP_ATTACHED_HW,
+	XDP_ATTACHED_MULTI,
 };
 
 enum {
@@ -923,6 +925,10 @@ enum {
 	IFLA_XDP_ATTACHED,
 	IFLA_XDP_FLAGS,
 	IFLA_XDP_PROG_ID,
+	IFLA_XDP_DRV_PROG_ID,
+	IFLA_XDP_SKB_PROG_ID,
+	IFLA_XDP_HW_PROG_ID,
+	IFLA_XDP_EXPECTED_FD,
 	__IFLA_XDP_MAX,
 };
 
@@ -936,30 +942,6 @@ enum {
 	IFLA_EVENT_NOTIFY_PEERS,	/* re-sent grat. arp/ndisc */
 	IFLA_EVENT_IGMP_RESEND,		/* re-sent IGMP JOIN */
 	IFLA_EVENT_BONDING_OPTIONS,	/* change in bonding options */
-};
-
-/* rmnet section */
-
-#define RMNET_FLAGS_INGRESS_DEAGGREGATION         (1U << 0)
-#define RMNET_FLAGS_INGRESS_MAP_COMMANDS          (1U << 1)
-#define RMNET_FLAGS_INGRESS_MAP_CKSUMV4           (1U << 2)
-#define RMNET_FLAGS_EGRESS_MAP_CKSUMV4            (1U << 3)
-#define RMNET_FLAGS_INGRESS_COALESCE              (1U << 4)
-#define RMNET_FLAGS_INGRESS_MAP_CKSUMV5           (1U << 5)
-#define RMNET_FLAGS_EGRESS_MAP_CKSUMV5            (1U << 6)
-
-enum {
-	IFLA_RMNET_UNSPEC,
-	IFLA_RMNET_MUX_ID,
-	IFLA_RMNET_FLAGS,
-	__IFLA_RMNET_MAX,
-};
-
-#define IFLA_RMNET_MAX (__IFLA_RMNET_MAX - 1)
-
-struct ifla_rmnet_flags {
-	__u32   flags;
-	__u32   mask;
 };
 
 #endif /* _UAPI_LINUX_IF_LINK_H */
