@@ -121,6 +121,7 @@ static void __unhash_process(struct task_struct *p, bool group_dead)
 	nr_threads--;
 	detach_pid(p, PIDTYPE_PID);
 	if (group_dead) {
+		detach_pid(p, PIDTYPE_TGID);
 		detach_pid(p, PIDTYPE_PGID);
 		detach_pid(p, PIDTYPE_SID);
 
@@ -494,6 +495,8 @@ retry:
 	 * Search through everything else, we should not get here often.
 	 */
 	for_each_process(g) {
+		if (atomic_read(&mm->mm_users) <= 1)
+			break;
 		if (g->flags & PF_KTHREAD)
 			continue;
 		for_each_thread(g, c) {
@@ -544,7 +547,6 @@ static void exit_mm(void)
 {
 	struct mm_struct *mm = current->mm;
 	struct core_state *core_state;
-	int mm_released;
 
 	exit_mm_release(current, mm);
 	if (!mm)
@@ -594,16 +596,9 @@ static void exit_mm(void)
 	enter_lazy_tlb(mm, current);
 	task_unlock(current);
 	mm_update_next_owner(mm);
-
-	mm_released = mmput(mm);
-#ifdef CONFIG_ANDROID_SIMPLE_LMK
-	clear_thread_flag(TIF_MEMDIE);
-#else
+	mmput(mm);
 	if (test_thread_flag(TIF_MEMDIE))
 		exit_oom_victim();
-	if (mm_released)
-		set_tsk_thread_flag(current, TIF_MM_RELEASED);
-#endif
 }
 
 static struct task_struct *find_alive_thread(struct task_struct *p)
@@ -808,7 +803,6 @@ static void check_stack_usage(void)
 	static DEFINE_SPINLOCK(low_water_lock);
 	static int lowest_to_date = THREAD_SIZE;
 	unsigned long free;
-	int islower = false;
 
 	free = stack_not_used(current);
 
@@ -817,15 +811,11 @@ static void check_stack_usage(void)
 
 	spin_lock(&low_water_lock);
 	if (free < lowest_to_date) {
+		pr_info("%s (%d) used greatest stack depth: %lu bytes left\n",
+			current->comm, task_pid_nr(current), free);
 		lowest_to_date = free;
-		islower = true;
 	}
 	spin_unlock(&low_water_lock);
-
-	if (islower) {
-		pr_info("%s (%d) used greatest stack depth: %lu bytes left\n",
-				current->comm, task_pid_nr(current), free);
-	}
 }
 #else
 static inline void check_stack_usage(void) {}
@@ -878,18 +868,13 @@ void __noreturn do_exit(long code)
 	 * leave this task alone and wait for reboot.
 	 */
 	if (unlikely(tsk->flags & PF_EXITING)) {
-#ifdef CONFIG_PANIC_ON_RECURSIVE_FAULT
-		panic("Recursive fault!\n");
-#else
 		pr_alert("Fixing recursive fault but reboot is needed!\n");
-#endif
 		futex_exit_recursive(tsk);
 		set_current_state(TASK_UNINTERRUPTIBLE);
 		schedule();
 	}
 
 	exit_signals(tsk);  /* sets PF_EXITING */
-	sched_exit(tsk);
 
 	/* sync mm's RSS info before statistics gathering */
 	if (tsk->mm)
@@ -935,6 +920,8 @@ void __noreturn do_exit(long code)
 	exit_task_namespaces(tsk);
 	exit_task_work(tsk);
 	exit_thread(tsk);
+	if (group_dead)
+		exit_umh(tsk);
 
 	/*
 	 * Flush inherited counters to the parent - before the parent
@@ -1090,14 +1077,6 @@ struct wait_opts {
 	wait_queue_entry_t		child_wait;
 	int			notask_error;
 };
-
-static inline
-struct pid *task_pid_type(struct task_struct *task, enum pid_type type)
-{
-	if (type != PIDTYPE_PID)
-		task = task->group_leader;
-	return task->pids[type].pid;
-}
 
 static int eligible_pid(struct wait_opts *wo, struct task_struct *p)
 {
