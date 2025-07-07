@@ -41,7 +41,7 @@ jobs:
 
     - name: Building Kernel..
       run: |
-          curl https://raw.githubusercontent.com/itsshashanksp/Scripts/main/kernel.sh > kernel.sh
+          curl https://raw.githubusercontent.com/doctorstrange2003/builder/refs/heads/main/build.sh > kernel.sh
           chmod +x kernel.sh
           bash kernel.sh
       shell: bash
