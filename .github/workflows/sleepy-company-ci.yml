@@ -1,29 +1,27 @@
-name: Sleepy Company CI!
+name: Sleepy Company CI!-2
 on:
   workflow_dispatch:
     inputs:
       DEPLOY_DEVICE_TYPE:
-        description: 'Deploy Device Type (COURBET/DAVINCI/PHOENIX/SWEET)'
+        description: 'Deploy Device Type (davinci)'
         required: true
+        default: 'davinci'
       DEPLOY_TAG_TYPE:
-        description: 'Deploy Kernel version tag (example: v1 or v2)'
+        description: 'Kernel version tag (example: v1 or v2)'
         required: true
-        
+
 env:
-  CHATID: ${{ secrets.CHAT_ID }}
-  API_BOT: ${{ secrets.BOT_API }}
   DEVICE_TYPE: ${{ github.event.inputs.DEPLOY_DEVICE_TYPE }}
-  KERNEL_VERSION_TAG: ${{ github.event.inputs.DEPLOY_TAG_TYPE }}
+  KERNEL_TAG: ${{ github.event.inputs.DEPLOY_TAG_TYPE }}
 
 jobs:
   SLEEPYCI:
-    if: "(! contains(toJSON(github.event.commits.*.message), '[skip-ci]'))"
     runs-on: ubuntu-latest
     timeout-minutes: 90
-
+    permissions:
+      contents: write          # обязательно, иначе релиз не создастся
     steps:
-    - name: Creating Env!
-      uses: actions/checkout@v2
+    - uses: actions/checkout@v4
 
     - name: Setting up Env!
       run: |
@@ -34,14 +32,19 @@ jobs:
           ca-certificates python3 binutils \
           binutils-aarch64-linux-gnu binutils-arm-linux-gnueabi
 
-    - name: Export Vars
-      run: |
-          if [[ ${DEVICE_TYPE} == "${{ github.event.inputs.DEPLOY_DEVICE_TYPE }}" ]]; then echo "DEVICE_TYPE=${{ github.event.inputs.DEPLOY_DEVICE_TYPE }}"  >> $GITHUB_ENV;fi
-          if [[ ${KERNEL_VERSION_TAG} == "${{ github.event.inputs.DEPLOY_TAG_TYPE }}" ]]; then echo "KERNEL_TAG=${{ github.event.inputs.DEPLOY_TAG_TYPE }}"  >> $GITHUB_ENV;fi
-
     - name: Building Kernel..
       run: |
-          curl https://raw.githubusercontent.com/doctorstrange2003/builder/refs/heads/main/build.sh > kernel.sh
-          chmod +x kernel.sh
-          bash kernel.sh
+          chmod +x scripts/build.sh
+          bash scripts/build.sh
       shell: bash
+
+    - name: Publish Release
+      uses: softprops/action-gh-release@v2
+      with:
+          tag_name: ${{ github.event.inputs.DEPLOY_TAG_TYPE }}
+          name: SleepyKernel ${{ github.event.inputs.DEPLOY_TAG_TYPE }} (DAVINCI)
+          files: zip/*-signed.zip
+          body: |
+            Kernel: SLEEPY_KERNEL-OSS
+            Device: Redmi K20 (davinci)
+            Commit: ${{ github.sha }}
