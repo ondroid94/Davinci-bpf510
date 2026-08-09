@@ -93,8 +93,9 @@
 #define SECCLASS_INFINIBAND_PKEY                         89
 #define SECCLASS_INFINIBAND_ENDPORT                      90
 #define SECCLASS_BPF                                     91
-#define SECCLASS_PERF_EVENT                              92
-#define SECCLASS_ANON_INODE                              93
+#define SECCLASS_XDP_SOCKET                              92
+#define SECCLASS_PERF_EVENT                              93
+#define SECCLASS_ANON_INODE                              94
 
 #define SECINITSID_KERNEL                                   1
 #define SECINITSID_SECURITY                                 2
@@ -188,6 +189,7 @@ static inline bool security_is_socket_class(u16 kern_tclass)
 	case SECCLASS_KCM_SOCKET:
 	case SECCLASS_QIPCRTR_SOCKET:
 	case SECCLASS_SMC_SOCKET:
+	case SECCLASS_XDP_SOCKET:
 		sock = true;
 		break;
 	default:
