@@ -3,6 +3,7 @@
 #define _LINUX_TIMEKEEPING_H
 
 #include <linux/errno.h>
+#include <linux/timekeeping32.h>
 
 /* Included from linux/ktime.h */
 
