@@ -35,7 +35,6 @@
 #include <linux/delayed_call.h>
 #include <linux/uuid.h>
 #include <linux/errseq.h>
-#include <linux/ioprio.h>
 
 #include <asm/byteorder.h>
 #include <uapi/linux/fs.h>
@@ -236,7 +235,7 @@ struct iattr {
  */
 #define FILESYSTEM_MAX_STACK_DEPTH 2
 
-/**
+/** 
  * enum positive_aop_returns - aop return codes with specific semantics
  *
  * @AOP_WRITEPAGE_ACTIVATE: Informs the caller that page writeback has
@@ -246,7 +245,7 @@ struct iattr {
  * 			    be a candidate for writeback again in the near
  * 			    future.  Other callers must be careful to unlock
  * 			    the page if they get this return.  Returned by
- * 			    writepage();
+ * 			    writepage(); 
  *
  * @AOP_TRUNCATED_PAGE: The AOP method that was handed a locked page has
  *  			unlocked it and the page might have been truncated.
@@ -305,6 +304,8 @@ enum rw_hint {
 /* iocb->ki_waitq is valid */
 #define IOCB_WAITQ		(1 << 19)
 #define IOCB_NOIO		(1 << 20)
+/* kiocb is a read or write operation submitted by fs/aio.c. */
+#define IOCB_AIO_RW		(1 << 23)
 
 struct kiocb {
 	struct file		*ki_filp;
@@ -312,8 +313,7 @@ struct kiocb {
 	void (*ki_complete)(struct kiocb *iocb, long ret, long ret2);
 	void			*private;
 	int			ki_flags;
-	u16			ki_hint;
-	u16			ki_ioprio; /* See linux/ioprio.h */
+	enum rw_hint		ki_hint;
 } __randomize_layout;
 
 static inline bool is_sync_kiocb(struct kiocb *kiocb)
@@ -910,10 +910,6 @@ struct file {
 #endif /* #ifdef CONFIG_EPOLL */
 	struct address_space	*f_mapping;
 	errseq_t		f_wb_err;
-#ifdef CONFIG_FILE_TABLE_DEBUG
-	struct hlist_node f_hash;
-#endif /* #ifdef CONFIG_FILE_TABLE_DEBUG */
-	errseq_t		f_sb_err; /* for syncfs */
 } __randomize_layout
   __attribute__((aligned(4)));	/* lest something weird decides that 2 is OK */
 
@@ -937,8 +933,8 @@ static inline struct file *get_file(struct file *f)
 
 #define	MAX_NON_LFS	((1UL<<31) - 1)
 
-/* Page cache limit. The filesystems should put that into their s_maxbytes
-   limits, otherwise bad things can happen in VM. */
+/* Page cache limit. The filesystems should put that into their s_maxbytes 
+   limits, otherwise bad things can happen in VM. */ 
 #if BITS_PER_LONG==32
 #define MAX_LFS_FILESIZE	((loff_t)ULONG_MAX << PAGE_SHIFT)
 #elif BITS_PER_LONG==64
@@ -1330,7 +1326,7 @@ extern int send_sigurg(struct fown_struct *fown);
 /* These flags relate to encoding and casefolding */
 #define SB_ENC_STRICT_MODE_FL	(1 << 0)
 
-#define sb_has_strict_encoding(sb) \
+#define sb_has_enc_strict_mode(sb) \
 	(sb->s_encoding_flags & SB_ENC_STRICT_MODE_FL)
 
 /*
@@ -1399,11 +1395,12 @@ struct super_block {
 #ifdef CONFIG_FS_VERITY
 	const struct fsverity_operations *s_vop;
 #endif
+
+	struct hlist_bl_head	s_anon;		/* anonymous dentries for (nfs) exporting */
 #ifdef CONFIG_UNICODE
 	struct unicode_map *s_encoding;
 	__u16 s_encoding_flags;
 #endif
-	struct hlist_bl_head	s_anon;		/* anonymous dentries for (nfs) exporting */
 	struct list_head	s_mounts;	/* list of mounts; _not_ for fs use */
 	struct block_device	*s_bdev;
 	struct backing_dev_info *s_bdi;
@@ -1451,9 +1448,6 @@ struct super_block {
 
 	/* Being remounted read-only */
 	int s_readonly_remount;
-
-	/* per-sb errseq_t for reporting writeback errors via syncfs */
-	errseq_t s_wb_err;
 
 	/* AIO completions deferred from interrupt context */
 	struct workqueue_struct *s_dio_done_wq;
@@ -1660,8 +1654,7 @@ extern int vfs_rename(struct inode *, struct dentry *, struct inode *, struct de
 extern int vfs_rename2(struct vfsmount *, struct inode *, struct dentry *, struct inode *, struct dentry *, struct inode **, unsigned int);
 extern int vfs_whiteout(struct inode *, struct dentry *);
 
-extern struct dentry *vfs_tmpfile(struct vfsmount *mnt,
-				  struct dentry *dentry, umode_t mode,
+extern struct dentry *vfs_tmpfile(struct dentry *dentry, umode_t mode,
 				  int open_flag);
 
 int vfs_mkobj(struct dentry *, umode_t,
@@ -1684,9 +1677,6 @@ struct fiemap_extent_info {
 	struct fiemap_extent __user *fi_extents_start; /* Start of
 							fiemap_extent array */
 };
-
-int fiemap_prep(struct inode *inode, struct fiemap_extent_info *fieinfo,
-		u64 start, u64 *len, u32 supported_flags);
 int fiemap_fill_next_extent(struct fiemap_extent_info *info, u64 logical,
 			    u64 phys, u64 len, u32 flags);
 int fiemap_check_flags(struct fiemap_extent_info *fieinfo, u32 fs_flags);
@@ -1812,7 +1802,7 @@ struct inode_operations {
 			struct inode *, struct dentry *, unsigned int);
 	int (*setattr) (struct dentry *, struct iattr *);
 	int (*setattr2) (struct vfsmount *, struct dentry *, struct iattr *);
-	int (*getattr) (const struct path *, struct kstat *, u32, unsigned int);
+        int (*getattr) (const struct path *, struct kstat *, u32, unsigned int);
 	ssize_t (*listxattr) (struct dentry *, char *, size_t);
 	int (*fiemap)(struct inode *, struct fiemap_extent_info *, u64 start,
 		      u64 len);
@@ -1887,7 +1877,6 @@ struct super_operations {
 	void *(*clone_mnt_data) (void *);
 	void (*copy_mnt_data) (void *, void *);
 	void (*umount_begin) (struct super_block *);
-	void (*umount_end) (struct super_block *, int);
 
 	int (*show_options)(struct seq_file *, struct dentry *);
 	int (*show_options2)(struct vfsmount *,struct seq_file *, struct dentry *);
@@ -1991,22 +1980,12 @@ static inline enum rw_hint file_write_hint(struct file *file)
 
 static inline int iocb_flags(struct file *file);
 
-static inline u16 ki_hint_validate(enum rw_hint hint)
-{
-	typeof(((struct kiocb *)0)->ki_hint) max_hint = -1;
-
-	if (hint <= max_hint)
-		return hint;
-	return 0;
-}
-
 static inline void init_sync_kiocb(struct kiocb *kiocb, struct file *filp)
 {
 	*kiocb = (struct kiocb) {
 		.ki_filp = filp,
 		.ki_flags = iocb_flags(filp),
-		.ki_hint = ki_hint_validate(file_write_hint(filp)),
-		.ki_ioprio = IOPRIO_PRIO_VALUE(IOPRIO_CLASS_NONE, 0),
+		.ki_hint = file_write_hint(filp),
 	};
 }
 
@@ -2071,7 +2050,7 @@ static inline void init_sync_kiocb(struct kiocb *kiocb, struct file *filp)
  *
  * I_SYNC_QUEUED	Inode is queued in b_io or b_more_io writeback lists.
  *			Used to detect that mark_inode_dirty() should not move
- *			inode between dirty lists.
+ * 			inode between dirty lists.
  *
  * Q: What is the difference between I_WILL_FREE and I_FREEING?
  */
@@ -2155,15 +2134,13 @@ static inline void file_accessed(struct file *file)
 		touch_atime(&file->f_path);
 }
 
-extern int file_modified(struct file *file);
-
 int sync_inode(struct inode *inode, struct writeback_control *wbc);
 int sync_inode_metadata(struct inode *inode, int wait);
 
 struct file_system_type {
 	const char *name;
 	int fs_flags;
-#define FS_REQUIRES_DEV		1
+#define FS_REQUIRES_DEV		1 
 #define FS_BINARY_MOUNTDATA	2
 #define FS_HAS_SUBTYPE		4
 #define FS_USERNS_MOUNT		8	/* Can be mounted by userns root */
@@ -2526,7 +2503,6 @@ extern void bdput(struct block_device *);
 extern void invalidate_bdev(struct block_device *);
 extern void iterate_bdevs(void (*)(struct block_device *, void *), void *);
 extern int sync_blockdev(struct block_device *bdev);
-extern int sync_blockdev_range(struct block_device *bdev, loff_t lstart, loff_t lend);
 extern void kill_bdev(struct block_device *);
 extern struct super_block *freeze_bdev(struct block_device *);
 extern void emergency_thaw_all(void);
@@ -2755,18 +2731,6 @@ static inline errseq_t filemap_sample_wb_err(struct address_space *mapping)
 	return errseq_sample(&mapping->wb_err);
 }
 
-/**
- * file_sample_sb_err - sample the current errseq_t to test for later errors
- * @mapping: mapping to be sampled
- *
- * Grab the most current superblock-level errseq_t value for the given
- * struct file.
- */
-static inline errseq_t file_sample_sb_err(struct file *file)
-{
-	return errseq_sample(&file->f_path.dentry->d_sb->s_wb_err);
-}
-
 extern int vfs_fsync_range(struct file *file, loff_t start, loff_t end,
 			   int datasync);
 extern int vfs_fsync(struct file *file, int datasync);
@@ -2791,16 +2755,9 @@ static inline ssize_t generic_write_sync(struct kiocb *iocb, ssize_t count)
 
 extern void emergency_sync(void);
 extern void emergency_remount(void);
-
 #ifdef CONFIG_BLOCK
-extern int bmap(struct inode *inode, sector_t *block);
-#else
-static inline int bmap(struct inode *inode,  sector_t *block)
-{
-	return -EINVAL;
-}
+extern sector_t bmap(struct inode *, sector_t);
 #endif
-
 extern int notify_change(struct dentry *, struct iattr *, struct inode **);
 extern int notify_change2(struct vfsmount *, struct dentry *, struct iattr *, struct inode **);
 extern int inode_permission(struct inode *, int);
@@ -2936,7 +2893,7 @@ extern ssize_t kernel_read(struct file *, void *, size_t, loff_t *);
 extern ssize_t kernel_write(struct file *, const void *, size_t, loff_t *);
 extern ssize_t __kernel_write(struct file *, const void *, size_t, loff_t *);
 extern struct file * open_exec(const char *);
-
+ 
 /* fs/dcache.c -- generic fs support functions */
 extern bool is_subdir(struct dentry *, struct dentry *);
 extern bool path_is_under(const struct path *, const struct path *);
@@ -3022,6 +2979,8 @@ extern int sb_min_blocksize(struct super_block *, int);
 extern int generic_file_mmap(struct file *, struct vm_area_struct *);
 extern int generic_file_readonly_mmap(struct file *, struct vm_area_struct *);
 extern ssize_t generic_write_checks(struct kiocb *, struct iov_iter *);
+extern ssize_t generic_file_buffered_read(struct kiocb *iocb,
+		struct iov_iter *to, ssize_t already_read);
 extern ssize_t generic_file_read_iter(struct kiocb *, struct iov_iter *);
 extern ssize_t __generic_file_write_iter(struct kiocb *, struct iov_iter *);
 extern ssize_t generic_file_write_iter(struct kiocb *, struct iov_iter *);
@@ -3267,6 +3226,9 @@ extern int generic_file_fsync(struct file *, loff_t, loff_t, int);
 extern int generic_check_addressable(unsigned, u64);
 
 #ifdef CONFIG_UNICODE
+extern int generic_ci_d_hash(const struct dentry *dentry, struct qstr *str);
+extern int generic_ci_d_compare(const struct dentry *dentry, unsigned int len,
+				const char *str, const struct qstr *name);
 extern bool needs_casefold(const struct inode *dir);
 #else
 static inline bool needs_casefold(const struct inode *dir)
@@ -3274,7 +3236,8 @@ static inline bool needs_casefold(const struct inode *dir)
 	return 0;
 }
 #endif
-extern void generic_set_encrypted_ci_d_ops(struct dentry *dentry);
+extern void generic_set_encrypted_ci_d_ops(struct inode *dir,
+					   struct dentry *dentry);
 
 #ifdef CONFIG_MIGRATION
 extern int buffer_migrate_page(struct address_space *,
@@ -3455,7 +3418,6 @@ int proc_nr_dentry(struct ctl_table *table, int write,
 int proc_nr_inodes(struct ctl_table *table, int write,
 		   void *buffer, size_t *lenp, loff_t *ppos);
 int __init get_filesystem_list(char *buf);
-int get_filesystem_list_runtime(char *buf);
 
 #define __FMODE_EXEC		((__force int) FMODE_EXEC)
 #define __FMODE_NONOTIFY	((__force int) FMODE_NONOTIFY)
