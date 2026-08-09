@@ -42,7 +42,6 @@
 #include "../mm/internal.h"	/* For the trace_print_flags arrays */
 
 #include <asm/page.h>		/* for PAGE_SIZE */
-#include <asm/sections.h>	/* for dereference_function_descriptor() */
 #include <asm/byteorder.h>	/* cpu_to_le16 */
 
 #include <linux/string_helpers.h>
@@ -1565,7 +1564,7 @@ char *clock(char *buf, char *end, struct clk *clk, struct printf_spec spec,
 #ifdef CONFIG_COMMON_CLK
 		return string(buf, end, __clk_get_name(clk), spec);
 #else
-		return special_hex_number(buf, end, (unsigned long)clk, sizeof(unsigned long));
+		return ptr_to_id(buf, end, clk, spec);
 #endif
 	}
 }
@@ -1891,10 +1890,10 @@ char *pointer(const char *fmt, char *buf, char *end, void *ptr,
 	switch (*fmt) {
 	case 'F':
 	case 'f':
-		ptr = dereference_function_descriptor(ptr);
-		/* Fallthrough */
 	case 'S':
 	case 's':
+		ptr = dereference_symbol_descriptor(ptr);
+		/* Fallthrough */
 	case 'B':
 		return symbol_string(buf, end, ptr, spec, fmt);
 	case 'R':

@@ -477,7 +477,7 @@ static void free_pte_range(struct mmu_gather *tlb, pmd_t *pmd,
 	pgtable_t token = pmd_pgtable(*pmd);
 	pmd_clear(pmd);
 	pte_free_tlb(tlb, token, addr);
-	atomic_long_dec(&tlb->mm->nr_ptes);
+	mm_dec_nr_ptes(tlb->mm);
 }
 
 static inline void free_pmd_range(struct mmu_gather *tlb, pud_t *pud,
@@ -545,6 +545,7 @@ static inline void free_pud_range(struct mmu_gather *tlb, p4d_t *p4d,
 	pud = pud_offset(p4d, start);
 	p4d_clear(p4d);
 	pud_free_tlb(tlb, pud, start);
+	mm_dec_nr_puds(tlb->mm);
 }
 
 static inline void free_p4d_range(struct mmu_gather *tlb, pgd_t *pgd,
@@ -708,7 +709,7 @@ int __pte_alloc(struct mm_struct *mm, pmd_t *pmd, unsigned long address)
 
 	ptl = pmd_lock(mm, pmd);
 	if (likely(pmd_none(*pmd))) {	/* Has another populated it ? */
-		atomic_long_inc(&mm->nr_ptes);
+		mm_inc_nr_ptes(mm);
 		pmd_populate(mm, pmd, new);
 		new = NULL;
 	}
@@ -3118,8 +3119,8 @@ void unmap_mapping_range(struct address_space *mapping,
 		loff_t const holebegin, loff_t const holelen, int even_cows)
 {
 	struct zap_details details = { };
-	pgoff_t hba = holebegin >> PAGE_SHIFT;
-	pgoff_t hlen = (holelen + PAGE_SIZE - 1) >> PAGE_SHIFT;
+	pgoff_t hba = (pgoff_t)(holebegin) >> PAGE_SHIFT;
+	pgoff_t hlen = ((pgoff_t)(holelen) + PAGE_SIZE - 1) >> PAGE_SHIFT;
 
 	/* Check for overflow. */
 	if (sizeof(holelen) > sizeof(hlen)) {
@@ -3629,7 +3630,7 @@ static int pte_alloc_one_map(struct vm_fault *vmf)
 			goto map_pte;
 		}
 
-		atomic_long_inc(&vma->vm_mm->nr_ptes);
+		mm_inc_nr_ptes(vma->vm_mm);
 		pmd_populate(vma->vm_mm, vmf->pmd, vmf->prealloc_pte);
 		spin_unlock(vmf->ptl);
 		vmf->prealloc_pte = NULL;
@@ -3689,7 +3690,7 @@ static void deposit_prealloc_pte(struct vm_fault *vmf)
 	 * We are going to consume the prealloc table,
 	 * count that as nr_ptes.
 	 */
-	atomic_long_inc(&vma->vm_mm->nr_ptes);
+	mm_inc_nr_ptes(vma->vm_mm);
 	vmf->prealloc_pte = NULL;
 }
 
@@ -4003,9 +4004,11 @@ static int do_read_fault(struct vm_fault *vmf)
 	 * something).
 	 */
 	if (vma->vm_ops->map_pages && fault_around_bytes >> PAGE_SHIFT > 1) {
-		ret = do_fault_around(vmf);
-		if (ret)
-			return ret;
+		if (likely(!userfaultfd_minor(vmf->vma))) {
+			ret = do_fault_around(vmf);
+			if (ret)
+				return ret;
+		}
 	}
 
 	ret = __do_fault(vmf);
@@ -4848,15 +4851,17 @@ int __pud_alloc(struct mm_struct *mm, p4d_t *p4d, unsigned long address)
 
 	spin_lock(&mm->page_table_lock);
 #ifndef __ARCH_HAS_5LEVEL_HACK
-	if (p4d_present(*p4d))		/* Another has populated it */
-		pud_free(mm, new);
-	else
+	if (!p4d_present(*p4d)) {
+		mm_inc_nr_puds(mm);
 		p4d_populate(mm, p4d, new);
-#else
-	if (pgd_present(*p4d))		/* Another has populated it */
+	} else	/* Another has populated it */
 		pud_free(mm, new);
-	else
+#else
+	if (!pgd_present(*p4d)) {
+		mm_inc_nr_puds(mm);
 		pgd_populate(mm, p4d, new);
+	} else	/* Another has populated it */
+		pud_free(mm, new);
 #endif /* __ARCH_HAS_5LEVEL_HACK */
 	spin_unlock(&mm->page_table_lock);
 	return 0;
@@ -5031,6 +5036,10 @@ int follow_phys(struct vm_area_struct *vma,
 	if (follow_pte(vma->vm_mm, address, &ptep, &ptl))
 		goto out;
 	pte = *ptep;
+
+	/* Never return PFNs of anon folios in COW mappings. */
+	if (vm_normal_page(vma, address, pte))
+		goto unlock;
 
 	if ((flags & FOLL_WRITE) && !pte_write(pte))
 		goto unlock;

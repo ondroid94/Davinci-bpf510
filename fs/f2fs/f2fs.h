@@ -755,10 +755,7 @@ enum {
 	FI_COMPRESSED_FILE,	/* indicate file's data can be compressed */
 	FI_COMPRESS_CORRUPT,	/* indicate compressed cluster is corrupted */
 	FI_MMAP_FILE,		/* indicate file was mmapped */
-	FI_ENABLE_COMPRESS,	/* enable compression in "user" compression mode */
 	FI_COMPRESS_RELEASED,	/* compressed blocks were released */
-	FI_ALIGNED_WRITE,	/* enable aligned write */
-	FI_COW_FILE,		/* indicate COW file */
 	FI_MAX,			/* max flag, never be used */
 };
 
@@ -3708,7 +3705,7 @@ void f2fs_replace_block(struct f2fs_sb_info *sbi, struct dnode_of_data *dn,
 			block_t old_addr, block_t new_addr,
 			unsigned char version, bool recover_curseg,
 			bool recover_newaddr);
-void f2fs_allocate_data_block(struct f2fs_sb_info *sbi, struct page *page,
+int f2fs_allocate_data_block(struct f2fs_sb_info *sbi, struct page *page,
 			block_t old_blkaddr, block_t *new_blkaddr,
 			struct f2fs_summary *sum, int type,
 			struct f2fs_io_info *fio);
@@ -4368,14 +4365,20 @@ static inline int set_compress_context(struct inode *inode)
 #endif
 }
 
-static inline bool f2fs_disable_compressed_file(struct inode *inode)
+static inline u32 f2fs_disable_compressed_file(struct inode *inode)
 {
 	struct f2fs_inode_info *fi = F2FS_I(inode);
+	u32 i_compr_blocks;
 
 	if (!f2fs_compressed_file(inode))
-		return true;
-	if (S_ISREG(inode->i_mode) && F2FS_HAS_BLOCKS(inode))
-		return false;
+		return 0;
+	if (S_ISREG(inode->i_mode)) {
+		if (get_dirty_pages(inode))
+			return 1;
+		i_compr_blocks = atomic_read(&fi->i_compr_blocks);
+		if (i_compr_blocks)
+			return i_compr_blocks;
+	}
 
 	fi->i_flags &= ~F2FS_COMPR_FL;
 	stat_dec_compr_inode(inode);
@@ -4515,8 +4518,8 @@ static inline bool f2fs_may_compress(struct inode *inode)
 static inline void f2fs_i_compr_blocks_update(struct inode *inode,
 						u64 blocks, bool add)
 {
+	int diff = F2FS_I(inode)->i_cluster_size - blocks;
 	struct f2fs_inode_info *fi = F2FS_I(inode);
-	int diff = fi->i_cluster_size - blocks;
 
 	/* don't update i_compr_blocks if saved blocks were released */
 	if (!add && !atomic_read(&fi->i_compr_blocks))

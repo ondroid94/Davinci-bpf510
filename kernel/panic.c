@@ -29,9 +29,7 @@
 #include <linux/bug.h>
 #include <linux/ratelimit.h>
 #include <linux/sysfs.h>
-#define CREATE_TRACE_POINTS
-#include <trace/events/exception.h>
-#include <soc/qcom/minidump.h>
+#include <trace/events/error_report.h>
 
 #define PANIC_TIMER_STEP 100
 #define PANIC_BLINK_SPD 18
@@ -619,6 +617,7 @@ void __warn(const char *file, int line, void *caller, unsigned taint,
 		dump_stack();
 
 	print_oops_end_marker();
+	trace_error_report_end(ERROR_DETECTOR_WARN, (unsigned long)caller);
 
 	/* Just a warning, don't kill lockdep. */
 	add_taint(taint, LOCKDEP_STILL_OK);
@@ -664,7 +663,7 @@ EXPORT_SYMBOL(warn_slowpath_null);
  */
 __visible void __stack_chk_fail(void)
 {
-	panic("stack-protector: Kernel stack is corrupted in: %p\n",
+	panic("stack-protector: Kernel stack is corrupted in: %pB\n",
 		__builtin_return_address(0));
 }
 EXPORT_SYMBOL(__stack_chk_fail);
