@@ -26,7 +26,6 @@
 
 #include <linux/version.h>
 
-#include <linux/timekeeping.h>
 #ifndef ktime_get_boot_ns
 #define ktime_get_boot_ns ktime_get_boottime_ns
 #endif
@@ -34,7 +33,6 @@
 #include <linux/delay.h>
 #include <linux/ktime.h>
 #if (LINUX_VERSION_CODE >= KERNEL_VERSION(3, 17, 0))
-#include <linux/timekeeping.h>
 #else
 #include <linux/hrtimer.h>
 #endif
