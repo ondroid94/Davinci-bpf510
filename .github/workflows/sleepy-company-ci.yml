@@ -9,7 +9,6 @@ on:
       DEPLOY_TAG_TYPE:
         description: 'Deploy Kernel version tag (example: v1 or v2)'
         required: true
-
 jobs:
   SLEEPYCI:
     if: "(! contains(toJSON(github.event.commits.*.message), '[skip-ci]'))"
@@ -38,23 +37,22 @@ jobs:
         DEV: ${{ github.event.inputs.DEPLOY_DEVICE_TYPE }}
 
     - name: Building Kernel..
+      shell: bash
       run: |
+          set -o pipefail
           curl -sL https://raw.githubusercontent.com/doctorstrange2003/builder/refs/heads/main/build.sh > kernel.sh
-
-          # 1. вырезаем финальную уборку — иначе ZIP удалится до публикации
+          # 1. вырезаем финальную уборку — иначе ZIP/лог удалятся до публикации
           sed -i '/^rm -rf out zip error.log zipsigner-3.0.jar/d' kernel.sh
-
           # 2. глушим все вызовы телеграм-бота (определения функций не трогаем)
           sed -i -E 's/^([[:space:]]*)tg_(post_msg|post_build|error)[[:space:]]/\1: /' kernel.sh
-
           chmod +x kernel.sh
-          bash kernel.sh
-      shell: bash
+          # тиим весь вывод в build.log; pipefail сохраняет код возврата сборки
+          bash kernel.sh 2>&1 | tee build.log
 
     - name: Collect artifacts
       run: |
           mkdir -p release
-          cp zip/*-signed.zip release/
+          cp zip/*-signed.zip release/ || true
           cp out/arch/arm64/boot/Image.gz  release/ || true
           cp out/arch/arm64/boot/dtbo.img  release/ || true
           ls -lh release/
@@ -70,10 +68,42 @@ jobs:
           Build: ${{ github.run_number }} — commit `${{ github.sha }}`
         files: release/*
 
-    - name: Upload build log on failure
+    # ---------- обработка сбоя: собираем и публикуем лог в Releases ----------
+    - name: Collect failure logs
       if: failure()
-      uses: actions/upload-artifact@v4
+      shell: bash
+      run: |
+          mkdir -p faillog
+          # build.log (полный вывод сборки) — создаётся на шаге Building Kernel
+          [ -f build.log ] && cp build.log faillog/ || true
+          # error.log, где бы его ни оставил build.sh (корень / out / подпапки)
+          find . -maxdepth 5 -name 'error.log' -exec cp --parents {} faillog/ \; 2>/dev/null || true
+          # если error.log так и не нашёлся — делаем его из хвоста build.log,
+          # чтобы в релизе всегда был файл с именем error.log
+          if ! find faillog -name 'error.log' | grep -q .; then
+            tail -n 400 build.log > faillog/error.log 2>/dev/null || echo "no build.log produced" > faillog/error.log
+          fi
+          # короткая выжимка — первые реальные ошибки компиляции/линковки
+          {
+            echo "=== First compile/link errors ==="
+            grep -nE 'error:|undefined reference|Error [0-9]+|No rule to make' build.log | head -n 60 || true
+            echo
+            echo "=== Last 200 lines of build.log ==="
+            tail -n 200 build.log || true
+          } > faillog/error_summary.txt 2>/dev/null || true
+          echo "Collected:"; find faillog -type f -exec ls -lh {} \;
+
+    - name: Publish error log to Releases on failure
+      if: failure()
+      uses: softprops/action-gh-release@v2
       with:
-        name: error-log
-        path: error.log
-        if-no-files-found: ignore
+        tag_name: ${{ github.event.inputs.DEPLOY_TAG_TYPE }}-errorlog
+        name: BUILD FAILED — ${{ github.event.inputs.DEPLOY_TAG_TYPE }} (DAVINCI) #${{ github.run_number }}
+        body: |
+          ❌ Build failed.
+          Device: davinci
+          Run: #${{ github.run_number }} — commit `${{ github.sha }}`
+          Attached: error.log, full build.log, error_summary.txt (первые ошибки + хвост лога).
+        files: |
+          faillog/**
+        fail_on_unmatched_files: false
