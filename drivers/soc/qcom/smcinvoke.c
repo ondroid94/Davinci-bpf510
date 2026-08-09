@@ -19,7 +19,6 @@
 #include <linux/device.h>
 #include <linux/platform_device.h>
 #include <linux/slab.h>
-#include <linux/overflow.h>
 #include <linux/file.h>
 #include <linux/fs.h>
 #include <linux/anon_inodes.h>
@@ -564,10 +563,13 @@ static struct smcinvoke_cb_txn *find_cbtxn_locked(
 }
 
 /*
- * size_add saturates at SIZE_MAX. If integer overflow is detected,
+ * smcinvoke_size_add saturates at SIZE_MAX. If integer overflow is detected,
  * this function would return SIZE_MAX otherwise normal a+b is returned.
  */
-/* size_add now provided by linux/overflow.h (5.10 backport); local version removed */
+static inline size_t smcinvoke_size_add(size_t a, size_t b)
+{
+	return (b > (SIZE_MAX - a)) ? SIZE_MAX : a + b;
+}
 
 /*
  * pad_size is used along with size_align to define a buffer overflow
@@ -584,7 +586,7 @@ static inline size_t pad_size(size_t a, size_t b)
  */
 static inline size_t size_align(size_t a, size_t b)
 {
-	return size_add(a, pad_size(a, b));
+	return smcinvoke_size_add(a, pad_size(a, b));
 }
 
 static uint16_t get_server_id(int cb_server_fd)
@@ -1209,7 +1211,7 @@ static size_t compute_in_msg_size(const struct smcinvoke_cmd_req *req,
 
 	/* each buffer has to be 8 bytes aligned */
 	while (i < OBJECT_COUNTS_NUM_buffers(req->counts))
-		total_size = size_add(total_size,
+		total_size = smcinvoke_size_add(total_size,
 		size_align(args_buf[i++].b.size, SMCINVOKE_ARGS_ALIGN_SIZE));
 
 	return PAGE_ALIGN(total_size);
