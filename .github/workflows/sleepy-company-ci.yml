@@ -1,4 +1,4 @@
-name: NEW
+name: 11
 on:
   workflow_dispatch:
     inputs:
@@ -10,17 +10,13 @@ on:
         description: 'Deploy Kernel version tag (example: v1 or v2)'
         required: true
 
-env:
-  CHATID: ${{ secrets.CHAT_ID }}
-  API_BOT: ${{ secrets.BOT_API }}
-
 jobs:
   SLEEPYCI:
     if: "(! contains(toJSON(github.event.commits.*.message), '[skip-ci]'))"
     runs-on: ubuntu-latest
     timeout-minutes: 90
     permissions:
-      contents: write          # без этого релиз не создастся
+      contents: write
     steps:
     - name: Creating Env!
       uses: actions/checkout@v4
@@ -36,7 +32,6 @@ jobs:
 
     - name: Export Vars
       run: |
-          # скрипт ждёт строчные буквы, инпут приходит заглавными
           echo "DEVICE_TYPE=${DEV,,}" >> $GITHUB_ENV
           echo "KERNEL_TAG=${{ github.event.inputs.DEPLOY_TAG_TYPE }}" >> $GITHUB_ENV
       env:
@@ -45,8 +40,13 @@ jobs:
     - name: Building Kernel..
       run: |
           curl -sL https://raw.githubusercontent.com/doctorstrange2003/builder/refs/heads/main/build.sh > kernel.sh
-          # вырезаем финальную уборку, иначе ZIP исчезнет вместе с out/ и zip/
+
+          # 1. вырезаем финальную уборку — иначе ZIP удалится до публикации
           sed -i '/^rm -rf out zip error.log zipsigner-3.0.jar/d' kernel.sh
+
+          # 2. глушим все вызовы телеграм-бота (определения функций не трогаем)
+          sed -i -E 's/^([[:space:]]*)tg_(post_msg|post_build|error)[[:space:]]/\1: /' kernel.sh
+
           chmod +x kernel.sh
           bash kernel.sh
       shell: bash
@@ -55,8 +55,8 @@ jobs:
       run: |
           mkdir -p release
           cp zip/*-signed.zip release/
-          cp out/arch/arm64/boot/Image.gz release/ || true
-          cp out/arch/arm64/boot/dtbo.img release/ || true
+          cp out/arch/arm64/boot/Image.gz  release/ || true
+          cp out/arch/arm64/boot/dtbo.img  release/ || true
           ls -lh release/
 
     - name: Publish Release
@@ -69,5 +69,11 @@ jobs:
           Device: Redmi K20 / Mi 9T (davinci)
           Build: ${{ github.run_number }} — commit `${{ github.sha }}`
         files: release/*
-        draft: false
-        prerelease: false
+
+    - name: Upload build log on failure
+      if: failure()
+      uses: actions/upload-artifact@v4
+      with:
+        name: error-log
+        path: error.log
+        if-no-files-found: ignore
