@@ -159,13 +159,9 @@ struct pid_entry {
 #define REG(NAME, MODE, fops)				\
 	NOD(NAME, (S_IFREG|(MODE)), NULL, &fops, {})
 #define ONE(NAME, MODE, show)				\
-	NOD(NAME, (S_IFREG|(MODE)),			\
+	NOD(NAME, (S_IFREG|(MODE)), 			\
 		NULL, &proc_single_file_operations,	\
 		{ .proc_show = show } )
-#define ATTR(LSM, NAME, MODE)				\
-	NOD(NAME, (S_IFREG|(MODE)),			\
-		NULL, &proc_pid_attr_operations,	\
-		{ .lsm = LSM })
 
 /*
  * Count the number of hardlinks for the pid_entry table, excluding the .
@@ -348,151 +344,9 @@ static ssize_t proc_pid_cmdline_read(struct file *file, char __user *buf,
 		return -ESRCH;
 	ret = get_task_cmdline(tsk, buf, count, pos);
 	put_task_struct(tsk);
-	if (!mm)
-		return 0;
-	/* Check if process spawned far enough to have cmdline. */
-	if (!mm->env_end) {
-		rv = 0;
-		goto out_mmput;
-	}
-
-	page = (char *)__get_free_page(GFP_KERNEL);
-	if (!page) {
-		rv = -ENOMEM;
-		goto out_mmput;
-	}
-
-	spin_lock(&mm->arg_lock);
-	arg_start = mm->arg_start;
-	arg_end = mm->arg_end;
-	env_start = mm->env_start;
-	env_end = mm->env_end;
-	spin_unlock(&mm->arg_lock);
-
-	BUG_ON(arg_start > arg_end);
-	BUG_ON(env_start > env_end);
-
-	len1 = arg_end - arg_start;
-	len2 = env_end - env_start;
-
-	/* Empty ARGV. */
-	if (len1 == 0) {
-		rv = 0;
-		goto out_free_page;
-	}
-	/*
-	 * Inherently racy -- command line shares address space
-	 * with code and data.
-	 */
-	rv = access_remote_vm(mm, arg_end - 1, &c, 1, FOLL_ANON);
-	if (rv <= 0)
-		goto out_free_page;
-
-	rv = 0;
-
-	if (c == '\0') {
-		/* Command line (set of strings) occupies whole ARGV. */
-		if (len1 <= *pos)
-			goto out_free_page;
-
-		p = arg_start + *pos;
-		len = len1 - *pos;
-		while (count > 0 && len > 0) {
-			unsigned int _count;
-			int nr_read;
-
-			_count = min3(count, len, PAGE_SIZE);
-			nr_read = access_remote_vm(mm, p, page, _count, FOLL_ANON);
-			if (nr_read < 0)
-				rv = nr_read;
-			if (nr_read <= 0)
-				goto out_free_page;
-
-			if (copy_to_user(buf, page, nr_read)) {
-				rv = -EFAULT;
-				goto out_free_page;
-			}
-
-			p	+= nr_read;
-			len	-= nr_read;
-			buf	+= nr_read;
-			count	-= nr_read;
-			rv	+= nr_read;
-		}
-	} else {
-		/*
-		 * Command line (1 string) occupies ARGV and
-		 * extends into ENVP.
-		 */
-		struct {
-			unsigned long p;
-			unsigned long len;
-		} cmdline[2] = {
-			{ .p = arg_start, .len = len1 },
-			{ .p = env_start, .len = len2 },
-		};
-		loff_t pos1 = *pos;
-		unsigned int i;
-
-		i = 0;
-		while (i < 2 && pos1 >= cmdline[i].len) {
-			pos1 -= cmdline[i].len;
-			i++;
-		}
-		while (i < 2) {
-			p = cmdline[i].p + pos1;
-			len = cmdline[i].len - pos1;
-			while (count > 0 && len > 0) {
-				unsigned int _count, l;
-				int nr_read;
-				bool final;
-
-				_count = min3(count, len, PAGE_SIZE);
-				nr_read = access_remote_vm(mm, p, page, _count, FOLL_ANON);
-				if (nr_read < 0)
-					rv = nr_read;
-				if (nr_read <= 0)
-					goto out_free_page;
-
-				/*
-				 * Command line can be shorter than whole ARGV
-				 * even if last "marker" byte says it is not.
-				 */
-				final = false;
-				l = strnlen(page, nr_read);
-				if (l < nr_read) {
-					nr_read = l;
-					final = true;
-				}
-
-				if (copy_to_user(buf, page, nr_read)) {
-					rv = -EFAULT;
-					goto out_free_page;
-				}
-
-				p	+= nr_read;
-				len	-= nr_read;
-				buf	+= nr_read;
-				count	-= nr_read;
-				rv	+= nr_read;
-
-				if (final)
-					goto out_free_page;
-			}
-
-			/* Only first chunk can be read partially. */
-			pos1 = 0;
-			i++;
-		}
-	}
-
-out_free_page:
-	free_page((unsigned long)page);
-out_mmput:
-	mmput(mm);
-	if (rv > 0)
-		*pos += rv;
-	return rv;
+	if (ret > 0)
+		*pos += ret;
+	return ret;
 }
 
 static const struct file_operations proc_pid_cmdline_ops = {
@@ -2965,7 +2819,7 @@ static ssize_t proc_pid_attr_read(struct file * file, char __user * buf,
 	if (!task)
 		return -ESRCH;
 
-	length = security_getprocattr(task, PROC_I(inode)->op.lsm,
+	length = security_getprocattr(task,
 				      (char*)file->f_path.dentry->d_name.name,
 				      &p);
 	put_task_struct(task);
@@ -2979,53 +2833,51 @@ static ssize_t proc_pid_attr_write(struct file * file, const char __user * buf,
 				   size_t count, loff_t *ppos)
 {
 	struct inode * inode = file_inode(file);
-	struct task_struct *task;
 	void *page;
-	int rv;
+	ssize_t length;
+	struct task_struct *task = get_proc_task(inode);
 
 	/* A task may only write when it was the opener. */
 	if (file->private_data != current->mm)
 		return -EPERM;
 
-	rcu_read_lock();
-	task = pid_task(proc_pid(inode), PIDTYPE_PID);
-	if (!task) {
-		rcu_read_unlock();
-		return -ESRCH;
-	}
+	length = -ESRCH;
+	if (!task)
+		goto out_no_task;
+
 	/* A task may only write its own attributes. */
-	if (current != task) {
-		rcu_read_unlock();
-		return -EACCES;
-	}
-	rcu_read_unlock();
+	length = -EACCES;
+	if (current != task)
+		goto out;
 
 	if (count > PAGE_SIZE)
 		count = PAGE_SIZE;
 
 	/* No partial writes. */
+	length = -EINVAL;
 	if (*ppos != 0)
-		return -EINVAL;
+		goto out;
 
 	page = memdup_user(buf, count);
 	if (IS_ERR(page)) {
-		rv = PTR_ERR(page);
+		length = PTR_ERR(page);
 		goto out;
 	}
 
 	/* Guard against adverse ptrace interaction */
-	rv = mutex_lock_interruptible(&current->signal->cred_guard_mutex);
-	if (rv < 0)
+	length = mutex_lock_interruptible(&current->signal->cred_guard_mutex);
+	if (length < 0)
 		goto out_free;
 
-	rv = security_setprocattr(PROC_I(inode)->op.lsm,
-				  file->f_path.dentry->d_name.name, page,
-				  count);
+	length = security_setprocattr(file->f_path.dentry->d_name.name,
+				      page, count);
 	mutex_unlock(&current->signal->cred_guard_mutex);
 out_free:
 	kfree(page);
 out:
-	return rv;
+	put_task_struct(task);
+out_no_task:
+	return length;
 }
 
 static const struct file_operations proc_pid_attr_operations = {
@@ -3036,53 +2888,13 @@ static const struct file_operations proc_pid_attr_operations = {
 	.release	= mem_release,
 };
 
-#define LSM_DIR_OPS(LSM) \
-static int proc_##LSM##_attr_dir_iterate(struct file *filp, \
-			     struct dir_context *ctx) \
-{ \
-	return proc_pident_readdir(filp, ctx, \
-				   LSM##_attr_dir_stuff, \
-				   ARRAY_SIZE(LSM##_attr_dir_stuff)); \
-} \
-\
-static const struct file_operations proc_##LSM##_attr_dir_ops = { \
-	.read		= generic_read_dir, \
-	.iterate	= proc_##LSM##_attr_dir_iterate, \
-	.llseek		= default_llseek, \
-}; \
-\
-static struct dentry *proc_##LSM##_attr_dir_lookup(struct inode *dir, \
-				struct dentry *dentry, unsigned int flags) \
-{ \
-	return proc_pident_lookup(dir, dentry, \
-				  LSM##_attr_dir_stuff, \
-				  ARRAY_SIZE(LSM##_attr_dir_stuff)); \
-} \
-\
-static const struct inode_operations proc_##LSM##_attr_dir_inode_ops = { \
-	.lookup		= proc_##LSM##_attr_dir_lookup, \
-	.getattr	= pid_getattr, \
-	.setattr	= proc_setattr, \
-}
-
-#ifdef CONFIG_SECURITY_SMACK
-static const struct pid_entry smack_attr_dir_stuff[] = {
-	ATTR("smack", "current",	0666),
-};
-LSM_DIR_OPS(smack);
-#endif
-
 static const struct pid_entry attr_dir_stuff[] = {
-	ATTR(NULL, "current",		0666),
-	ATTR(NULL, "prev",		0444),
-	ATTR(NULL, "exec",		0666),
-	ATTR(NULL, "fscreate",		0666),
-	ATTR(NULL, "keycreate",		0666),
-	ATTR(NULL, "sockcreate",	0666),
-#ifdef CONFIG_SECURITY_SMACK
-	DIR("smack",			0555,
-	    proc_smack_attr_dir_inode_ops, proc_smack_attr_dir_ops),
-#endif
+	REG("current",    S_IRUGO|S_IWUGO, proc_pid_attr_operations),
+	REG("prev",       S_IRUGO,	   proc_pid_attr_operations),
+	REG("exec",       S_IRUGO|S_IWUGO, proc_pid_attr_operations),
+	REG("fscreate",   S_IRUGO|S_IWUGO, proc_pid_attr_operations),
+	REG("keycreate",  S_IRUGO|S_IWUGO, proc_pid_attr_operations),
+	REG("sockcreate", S_IRUGO|S_IWUGO, proc_pid_attr_operations),
 };
 
 static int proc_attr_dir_readdir(struct file *file, struct dir_context *ctx)
