@@ -3445,6 +3445,8 @@ static inline bool __is_valid_data_blkaddr(block_t blkaddr)
 	return true;
 }
 
+#ifndef CONFIG_PAGEMAP_HAS_PAGE_PRIVATE_HELPERS
+#if 0 /* provided by linux/pagemap.h in 5.10 BPF backport */
 /**
  * attach_page_private - Attach private data to a page.
  * @page: Page to attach data to.
@@ -3481,6 +3483,8 @@ static inline void *detach_page_private(struct page *page)
 
 	return data;
 }
+#endif
+#endif
 
 /*
  * file.c
