@@ -11754,6 +11754,12 @@ static void __perf_event_exit_context(void *__info)
 	raw_spin_unlock(&ctx->lock);
 }
 
+/* davinci qcom: perf deferred-install on hotplug is not backported; stub keeps caller (kernel/cpu.c) linkable */
+int perf_event_restart_events(unsigned int cpu)
+{
+	return 0;
+}
+
 static void perf_event_exit_cpu_context(int cpu)
 {
 	struct perf_cpu_context *cpuctx;
