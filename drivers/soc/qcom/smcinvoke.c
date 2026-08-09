@@ -15,6 +15,7 @@
 
 #define pr_fmt(fmt) "smcinvoke: %s: " fmt, __func__
 
+#include <linux/overflow.h>
 #include <linux/module.h>
 #include <linux/device.h>
 #include <linux/platform_device.h>
@@ -566,10 +567,7 @@ static struct smcinvoke_cb_txn *find_cbtxn_locked(
  * size_add saturates at SIZE_MAX. If integer overflow is detected,
  * this function would return SIZE_MAX otherwise normal a+b is returned.
  */
-static inline size_t size_add(size_t a, size_t b)
-{
-	return (b > (SIZE_MAX - a)) ? SIZE_MAX : a + b;
-}
+/* size_add now provided by linux/overflow.h (5.10 backport); local version removed */
 
 /*
  * pad_size is used along with size_align to define a buffer overflow
