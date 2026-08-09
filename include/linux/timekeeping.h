@@ -3,7 +3,6 @@
 #define _LINUX_TIMEKEEPING_H
 
 #include <linux/errno.h>
-#include <linux/timekeeping32.h>
 
 /* Included from linux/ktime.h */
 
@@ -231,5 +230,7 @@ extern void read_persistent_clock64(struct timespec64 *ts);
 extern void read_boot_clock64(struct timespec64 *ts);
 extern int update_persistent_clock64(struct timespec64 now);
 
+
+#include <linux/timekeeping32.h>
 
 #endif
