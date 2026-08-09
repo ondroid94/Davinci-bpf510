@@ -2630,4 +2630,15 @@ extern __u32 sysctl_rmem_default;
 
 int sock_bindtoindex(struct sock *sk, int ifindex, bool lock_sk);
 
+
+/* davinci: qcom rmnet uses this to tune TCP small-queue pacing */
+#ifndef sk_pacing_shift_update
+static inline void sk_pacing_shift_update(struct sock *sk, int val)
+{
+	if (!sk || !sk_fullsock(sk) || sk->sk_pacing_shift == val)
+		return;
+	sk->sk_pacing_shift = val;
+}
+#endif
+
 #endif	/* _SOCK_H */
