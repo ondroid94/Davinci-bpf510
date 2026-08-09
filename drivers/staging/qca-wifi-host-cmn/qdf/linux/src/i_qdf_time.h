@@ -25,6 +25,11 @@
 #define _I_QDF_TIME_H
 
 #include <linux/version.h>
+
+#include <linux/timekeeping.h>
+#ifndef ktime_get_boot_ns
+#define ktime_get_boot_ns ktime_get_boottime_ns
+#endif
 #include <linux/jiffies.h>
 #include <linux/delay.h>
 #include <linux/ktime.h>
