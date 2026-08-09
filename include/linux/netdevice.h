@@ -2949,6 +2949,7 @@ struct softnet_data {
 #endif
 	unsigned int		dropped;
 	struct sk_buff_head	input_pkt_queue;
+	struct napi_struct	*current_napi;	/* davinci rmnet GRO ctx */
 	struct napi_struct	backlog;
 
 };
