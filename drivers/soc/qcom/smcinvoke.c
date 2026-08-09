@@ -15,11 +15,11 @@
 
 #define pr_fmt(fmt) "smcinvoke: %s: " fmt, __func__
 
-#include <linux/overflow.h>
 #include <linux/module.h>
 #include <linux/device.h>
 #include <linux/platform_device.h>
 #include <linux/slab.h>
+#include <linux/overflow.h>
 #include <linux/file.h>
 #include <linux/fs.h>
 #include <linux/anon_inodes.h>
