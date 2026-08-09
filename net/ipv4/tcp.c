@@ -295,6 +295,12 @@ int sysctl_tcp_wmem[3] __read_mostly;
 int sysctl_tcp_rmem[3] __read_mostly;
 
 EXPORT_SYMBOL(sysctl_tcp_mem);
+
+/* davinci qcom TCP delayed-ACK tuning knobs (definitions) */
+int sysctl_tcp_delack_seg __read_mostly = TCP_DELACK_SEG;
+EXPORT_SYMBOL(sysctl_tcp_delack_seg);
+int sysctl_tcp_use_userconfig __read_mostly;
+EXPORT_SYMBOL(sysctl_tcp_use_userconfig);
 EXPORT_SYMBOL(sysctl_tcp_rmem);
 EXPORT_SYMBOL(sysctl_tcp_wmem);
 
