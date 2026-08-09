@@ -211,6 +211,15 @@ static inline void *idr_find(const struct idr *idr, int id)
 #define idr_for_each_entry_ext(idr, entry, id)			\
 	for (id = 0; ((entry) = idr_get_next_ext(idr, &(id))) != NULL; ++id)
 
+/* davinci uses the _ul naming for the unsigned-long IDR iterators;
+ * phoenix/5.10 backport provides the identical helpers as _ext. */
+#ifndef idr_get_next_ul
+#define idr_get_next_ul idr_get_next_ext
+#endif
+#ifndef idr_for_each_entry_ul
+#define idr_for_each_entry_ul idr_for_each_entry_ext
+#endif
+
 /**
  * idr_for_each_entry_continue - continue iteration over an idr's elements of a given type
  * @idr:     idr handle
