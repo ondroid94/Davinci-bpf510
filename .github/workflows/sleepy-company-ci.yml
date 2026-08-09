@@ -1,4 +1,4 @@
-name: NEW
+name: Sleepy Company CI!
 on:
   workflow_dispatch:
     inputs:
