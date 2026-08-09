@@ -1,27 +1,29 @@
-name: Sleepy Company CI!-2
+name: NEW
 on:
   workflow_dispatch:
     inputs:
       DEPLOY_DEVICE_TYPE:
-        description: 'Deploy Device Type (davinci)'
+        description: 'Deploy Device Type (DAVINCI)'
         required: true
-        default: 'davinci'
+        default: 'DAVINCI'
       DEPLOY_TAG_TYPE:
-        description: 'Kernel version tag (example: v1 or v2)'
+        description: 'Deploy Kernel version tag (example: v1 or v2)'
         required: true
 
 env:
-  DEVICE_TYPE: ${{ github.event.inputs.DEPLOY_DEVICE_TYPE }}
-  KERNEL_TAG: ${{ github.event.inputs.DEPLOY_TAG_TYPE }}
+  CHATID: ${{ secrets.CHAT_ID }}
+  API_BOT: ${{ secrets.BOT_API }}
 
 jobs:
   SLEEPYCI:
+    if: "(! contains(toJSON(github.event.commits.*.message), '[skip-ci]'))"
     runs-on: ubuntu-latest
     timeout-minutes: 90
     permissions:
-      contents: write          # обязательно, иначе релиз не создастся
+      contents: write          # без этого релиз не создастся
     steps:
-    - uses: actions/checkout@v4
+    - name: Creating Env!
+      uses: actions/checkout@v4
 
     - name: Setting up Env!
       run: |
@@ -32,19 +34,40 @@ jobs:
           ca-certificates python3 binutils \
           binutils-aarch64-linux-gnu binutils-arm-linux-gnueabi
 
+    - name: Export Vars
+      run: |
+          # скрипт ждёт строчные буквы, инпут приходит заглавными
+          echo "DEVICE_TYPE=${DEV,,}" >> $GITHUB_ENV
+          echo "KERNEL_TAG=${{ github.event.inputs.DEPLOY_TAG_TYPE }}" >> $GITHUB_ENV
+      env:
+        DEV: ${{ github.event.inputs.DEPLOY_DEVICE_TYPE }}
+
     - name: Building Kernel..
       run: |
-          chmod +x scripts/build.sh
-          bash scripts/build.sh
+          curl -sL https://raw.githubusercontent.com/doctorstrange2003/builder/refs/heads/main/build.sh > kernel.sh
+          # вырезаем финальную уборку, иначе ZIP исчезнет вместе с out/ и zip/
+          sed -i '/^rm -rf out zip error.log zipsigner-3.0.jar/d' kernel.sh
+          chmod +x kernel.sh
+          bash kernel.sh
       shell: bash
+
+    - name: Collect artifacts
+      run: |
+          mkdir -p release
+          cp zip/*-signed.zip release/
+          cp out/arch/arm64/boot/Image.gz release/ || true
+          cp out/arch/arm64/boot/dtbo.img release/ || true
+          ls -lh release/
 
     - name: Publish Release
       uses: softprops/action-gh-release@v2
       with:
-          tag_name: ${{ github.event.inputs.DEPLOY_TAG_TYPE }}
-          name: SleepyKernel ${{ github.event.inputs.DEPLOY_TAG_TYPE }} (DAVINCI)
-          files: zip/*-signed.zip
-          body: |
-            Kernel: SLEEPY_KERNEL-OSS
-            Device: Redmi K20 (davinci)
-            Commit: ${{ github.sha }}
+        tag_name: ${{ github.event.inputs.DEPLOY_TAG_TYPE }}
+        name: SLEEPY_KERNEL-OSS ${{ github.event.inputs.DEPLOY_TAG_TYPE }} (DAVINCI)
+        body: |
+          Kernel: SLEEPY_KERNEL-OSS
+          Device: Redmi K20 / Mi 9T (davinci)
+          Build: ${{ github.run_number }} — commit `${{ github.sha }}`
+        files: release/*
+        draft: false
+        prerelease: false
