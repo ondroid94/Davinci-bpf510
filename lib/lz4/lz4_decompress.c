@@ -119,8 +119,9 @@ static FORCE_INLINE int LZ4_decompress_generic(
 
 	/* Main Loop : decode sequences */
 	while (1) {
-		token = *ip++;
-		length = token >> ML_BITS;
+		size_t length;
+		const BYTE *match;
+		size_t offset;
 
 		/* get literal length */
 		unsigned int const token = *ip++;
@@ -186,6 +187,7 @@ static FORCE_INLINE int LZ4_decompress_generic(
 
 		/* decode literal length */
 		if (length == RUN_MASK) {
+			unsigned int s;
 
 			if (unlikely(endOnInput ? ip >= iend - RUN_MASK : 0)) {
 				/* overflow detection */
@@ -229,7 +231,7 @@ static FORCE_INLINE int LZ4_decompress_generic(
 					length = oend - op;
 				}
 				if ((endOnInput)
-				    && (ip + length > iend)) {
+					&& (ip + length > iend)) {
 					/*
 					 * Error :
 					 * read attempt beyond
@@ -239,7 +241,7 @@ static FORCE_INLINE int LZ4_decompress_generic(
 				}
 			} else {
 				if ((!endOnInput)
-				    && (cpy != oend)) {
+					&& (cpy != oend)) {
 					/*
 					 * Error :
 					 * block decoding must
@@ -248,7 +250,7 @@ static FORCE_INLINE int LZ4_decompress_generic(
 					goto _output_error;
 				}
 				if ((endOnInput)
-				    && ((ip + length != iend)
+					&& ((ip + length != iend)
 					|| (cpy > oend))) {
 					/*
 					 * Error :
@@ -307,13 +309,16 @@ _copy_match:
 		}
 
 		if (length == ML_MASK) {
+			unsigned int s;
 
-			variable_length_error error = ok;
-			length +=
-			    read_variable_length(&ip, iend - LASTLITERALS + 1,
-						 endOnInput, 0, &error);
-			if (error != ok)
-				goto _output_error;
+			do {
+				s = *ip++;
+
+				if ((endOnInput) && (ip > iend - LASTLITERALS))
+					goto _output_error;
+
+				length += s;
+			} while (s == 255);
 
 			if ((safeDecode)
 				&& unlikely(
@@ -421,7 +426,7 @@ _copy_match:
 			}
 
 			if (op < oCopyLimit) {
-				LZ4_wildCopy8(op, match, oCopyLimit);
+				LZ4_wildCopy(op, match, oCopyLimit);
 				match += oCopyLimit - op;
 				op = oCopyLimit;
 			}
@@ -430,7 +435,7 @@ _copy_match:
 		} else {
 			LZ4_copy8(op, match);
 			if (length > 16)
-				LZ4_wildCopy8(op + 8, match + 8, cpy);
+				LZ4_wildCopy(op + 8, match + 8, cpy);
 		}
 		op = cpy; /* wildcopy correction */
 	}
@@ -698,6 +703,15 @@ int LZ4_decompress_fast_usingDict(const char *source, char *dest,
 }
 
 #ifndef STATIC
+EXPORT_SYMBOL(LZ4_decompress_safe);
+EXPORT_SYMBOL(LZ4_decompress_safe_partial);
+EXPORT_SYMBOL(LZ4_decompress_fast);
+EXPORT_SYMBOL(LZ4_setStreamDecode);
+EXPORT_SYMBOL(LZ4_decompress_safe_continue);
+EXPORT_SYMBOL(LZ4_decompress_fast_continue);
+EXPORT_SYMBOL(LZ4_decompress_safe_usingDict);
+EXPORT_SYMBOL(LZ4_decompress_fast_usingDict);
+
 MODULE_LICENSE("Dual BSD/GPL");
 MODULE_DESCRIPTION("LZ4 decompressor");
 #endif
