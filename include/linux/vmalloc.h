@@ -26,6 +26,7 @@ struct notifier_block;		/* in notifier.h */
  * vfree_atomic().
  */
 #define VM_FLUSH_RESET_PERMS	0x00000100      /* Reset direct map and flush TLB on unmap */
+#define VM_LOWMEM		0x00000200	/* Tracking of direct mapped lowmem (davinci) */
 /* bits [20..32] reserved for arch specific ioremap internals */
 
 /*
